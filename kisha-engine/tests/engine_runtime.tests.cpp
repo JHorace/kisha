@@ -9,11 +9,28 @@
 #include <string>
 #include <catch2/catch_test_macros.hpp>
 
+#include <vulkan/vulkan_profiles.hpp>
+
 #include "engine.hpp"
 #include "engine_init_helpers.hpp"
 
 namespace {
 
+}
+
+TEST_CASE("Vulkan Profiles header is available and links", "[engine][profiles]") {
+  // Phase 1 smoke test: the vendored Vulkan Profiles client API compiles and
+  // links, and the generated header exposes the bundled standard profiles.
+  std::uint32_t profile_count = 0U;
+  REQUIRE(vpGetProfiles(&profile_count, nullptr) == VK_SUCCESS);
+  REQUIRE(profile_count > 0U);
+
+  std::vector<VpProfileProperties> profiles(profile_count);
+  REQUIRE(vpGetProfiles(&profile_count, profiles.data()) == VK_SUCCESS);
+  REQUIRE(profiles.size() == profile_count);
+  REQUIRE(std::ranges::all_of(profiles, [](const VpProfileProperties &profile) {
+    return profile.profileName[0] != '\0';
+  }));
 }
 
 TEST_CASE("Engine baseline raises an app api version below 1.3", "[engine][core][gpu]") {

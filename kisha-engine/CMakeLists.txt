@@ -27,6 +27,7 @@ target_link_libraries(
         kisha_engine_dependencies
         INTERFACE
         Vulkan::Vulkan
+        Vulkan::Profiles
         glm::glm
         GPUOpen::VulkanMemoryAllocator
         spdlog::spdlog
@@ -36,7 +37,7 @@ target_link_libraries(
 
 if(UNIX AND NOT APPLE)
     # Enable Linux-specific surface support.
-    #    # This allows use of Wayland, XCB, and X11 Vulkan types and extensions.
+    # This allows use of Wayland, XCB, and X11 Vulkan types and extensions.
     target_compile_definitions(kisha_engine_dependencies INTERFACE
             VK_USE_PLATFORM_WAYLAND_KHR
             VK_USE_PLATFORM_XCB_KHR
