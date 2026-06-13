@@ -223,10 +223,119 @@ std::expected<QueueSelection, EngineInitError> select_queue_families(const vk::r
   };
 }
   
-DeviceSelection select_physical_device(const vk::raii::PhysicalDevices &physical_devices,
-                                       const DeviceSpec &device_spec) {
-    return {};
+std::expected<DeviceSelection, EngineInitError> select_physical_device(const vk::raii::PhysicalDevices &physical_devices,
+                                                                       const DeviceSpec &device_spec) {
+  struct Candidate {
+    std::size_t index = 0U;
+    vk::PhysicalDeviceType type = vk::PhysicalDeviceType::eOther;
+    QueueSelection queues{};
+    std::vector<std::string> enabled_extensions;
+    std::vector<std::string> missing_optional_extensions;
+    std::size_t satisfied_optional = 0U;
+  };
+
+  std::vector<Candidate> discrete_candidates;
+  std::vector<Candidate> integrated_candidates;
+
+  for (std::size_t index = 0U; index < physical_devices.size(); ++index) {
+    const vk::raii::PhysicalDevice &physical_device = physical_devices[index];
+    const vk::PhysicalDeviceProperties properties = physical_device.getProperties();
+
+    // Only discrete and integrated GPUs are considered as device candidates.
+    if (properties.deviceType != vk::PhysicalDeviceType::eDiscreteGpu &&
+        properties.deviceType != vk::PhysicalDeviceType::eIntegratedGpu) {
+      continue;
+    }
+
+    if (std::vector<std::string> missing_features = physical_device_missing_features(physical_device); !missing_features.empty()) {
+      spdlog::debug("Skipping device '{}': missing required features: {}", std::string(properties.deviceName), missing_features);
+      continue;
+    }
+
+    const std::vector<std::string> available_extensions = enumerate_device_extension_names(physical_device);
+    if (auto r = validate_required_names(available_extensions, device_spec.required_extensions); !r) {
+      spdlog::debug("Skipping device '{}': missing required extensions: {}", std::string(properties.deviceName), r.error().missing_names);
+      continue;
+    }
+
+    const std::expected<QueueSelection, EngineInitError> queues = select_queue_families(physical_device);
+    if (!queues) {
+      spdlog::debug("Skipping device '{}': no suitable queue families", std::string(properties.deviceName));
+      continue;
+    }
+    if (device_spec.require_async_compute && !queues->has_dedicated_async_compute) {
+      spdlog::debug("Skipping device '{}': no dedicated async-compute queue family", std::string(properties.deviceName));
+      continue;
+    }
+    if (device_spec.require_dedicated_transfer && !queues->has_dedicated_transfer) {
+      spdlog::debug("Skipping device '{}': no dedicated transfer queue family", std::string(properties.deviceName));
+      continue;
+    }
+
+    const std::unordered_set<std::string> available_set(available_extensions.begin(), available_extensions.end());
+
+    std::vector<std::string> enabled_extensions = device_spec.required_extensions;
+    std::vector<std::string> missing_optional_extensions;
+    std::size_t satisfied_optional = 0U;
+    for (const std::string &name : device_spec.optional_extensions) {
+      if (available_set.contains(name)) {
+        append_unique(&enabled_extensions, name);
+        ++satisfied_optional;
+      } else {
+        append_unique(&missing_optional_extensions, name);
+      }
+    }
+
+    Candidate candidate{
+      .index = index,
+      .type = properties.deviceType,
+      .queues = *queues,
+      .enabled_extensions = std::move(enabled_extensions),
+      .missing_optional_extensions = std::move(missing_optional_extensions),
+      .satisfied_optional = satisfied_optional,
+    };
+
+    if (properties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu) {
+      discrete_candidates.push_back(std::move(candidate));
+    } else {
+      integrated_candidates.push_back(std::move(candidate));
+    }
   }
+
+  // Prefer the discrete GPU satisfying the most optional extensions; ties keep the first found.
+  const auto best_by_optional = [](const std::vector<Candidate> &candidates) -> const Candidate * {
+    const Candidate *best = nullptr;
+    for (const Candidate &candidate : candidates) {
+      if (best == nullptr || candidate.satisfied_optional > best->satisfied_optional) {
+        best = &candidate;
+      }
+    }
+    return best;
+  };
+
+  const Candidate *selected = best_by_optional(discrete_candidates);
+
+  if (selected == nullptr) {
+    if (device_spec.require_discrete_gpu) {
+      spdlog::error("No suitable discrete GPU found");
+      return std::unexpected(EngineInitError::NoSuitableDevice);
+    }
+    // Only fall back to an integrated GPU when a discrete one is not required and none is suitable.
+    selected = best_by_optional(integrated_candidates);
+  }
+
+  if (selected == nullptr) {
+    spdlog::error("No suitable physical device found");
+    return std::unexpected(EngineInitError::NoSuitableDevice);
+  }
+
+  return DeviceSelection{
+    .index = selected->index,
+    .queues = selected->queues,
+    .enabled_extensions = selected->enabled_extensions,
+    .missing_optional_extensions = selected->missing_optional_extensions,
+  };
+}
 
   VKAPI_ATTR VkBool32 VKAPI_CALL vulkan_debug_callback(const VkDebugUtilsMessageSeverityFlagBitsEXT severity, const VkDebugUtilsMessageTypeFlagsEXT message_type,
                                                        const VkDebugUtilsMessengerCallbackDataEXT *callback_data, void * /*user_data*/

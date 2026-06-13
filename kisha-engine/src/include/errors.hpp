@@ -13,6 +13,7 @@ namespace kisha::engine {
     MissingRequiredLayers,
     MissingRequiredExtensions,
     NoSuitableQueueFamily,
+    NoSuitableDevice,
   };
 
   struct MissingNamesError {
