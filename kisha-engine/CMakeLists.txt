@@ -57,7 +57,8 @@ if(NOT TARGET spdlog::spdlog)
 endif()
 
 if(NOT TARGET kisha_engine_dependencies)
-    add_library(kisha_engine_dependencies INTERFACE)
+    add_library(kisha_engine_dependencies INTERFACE
+            tests/engine_runtime.tests.cpp)
 endif()
 add_library(kisha::engine_dependencies ALIAS kisha_engine_dependencies)
 

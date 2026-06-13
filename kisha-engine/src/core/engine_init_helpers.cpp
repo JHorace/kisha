@@ -2,12 +2,15 @@
 // Created by jsumihiro on 6/12/26.
 //
 
+#include <expected>
 #include <optional>
 #include <ranges>
 #include <string>
 #include <unordered_set>
 #include <vector>
 #include <vulkan/vulkan_raii.hpp>
+
+#include "errors.hpp"
 
 namespace kisha::engine::util {
   namespace {
@@ -84,11 +87,15 @@ namespace kisha::engine::util {
         | std::ranges::to<std::vector>();
   }
 
-  std::vector<std::string> get_missing_names(const std::vector<std::string> &available,
-                               const std::vector<std::string> &required) {
+  std::expected<void, MissingNamesError> validate_required_names(const std::vector<std::string> &available,
+                                                                        const std::vector<std::string> &required) {
     const std::unordered_set<std::string> available_set(available.begin(), available.end());
-    return required
+    std::vector<std::string> missing = required
     | std::views::filter([&](const std::string &name) { return !available_set.contains(name); })
     | std::ranges::to<std::vector>();
+
+    if (!missing.empty())
+      return std::unexpected(MissingNamesError{std::move(missing)});
+    return {};   // success, no payload
   }
 }

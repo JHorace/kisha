@@ -9,6 +9,12 @@ namespace kisha::engine {
   enum class EngineInitError : uint8_t {
     Unknown = 0U,
     API_VERSION_TOO_LOW,
+    MissingRequiredLayers,
+    MissingRequiredExtensions,
+  };
+
+  struct MissingNamesError {
+    std::vector<std::string> missing_names;
   };
 }
 #endif //KISHA_ERRORS_HPP
