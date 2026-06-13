@@ -5,7 +5,26 @@
 #ifndef KISHA_ERRORS_HPP
 #define KISHA_ERRORS_HPP
 
+#include <concepts>
+#include <cstdint>
+#include <string>
+#include <vector>
+
 namespace kisha::engine {
+  /**
+   * @brief Concept satisfied by any error (or value) that can render a
+   *        human-readable description of itself via a `describe()` member
+   *        returning something convertible to `std::string`.
+   *
+   * This is the "describe" half of the describe/emit split: types own their
+   * textual representation, while emission policy (logger, severity, sink)
+   * stays at the call site.
+   */
+  template <typename E>
+  concept Describable = requires(const E &error) {
+    { error.describe() } -> std::convertible_to<std::string>;
+  };
+
   enum class EngineInitError : uint8_t {
     Unknown = 0U,
     NotImplemented,
@@ -18,6 +37,7 @@ namespace kisha::engine {
 
   struct MissingNamesError {
     std::vector<std::string> missing_names;
+    [[nodiscard]] std::string describe() const;
   };
 
   /**
@@ -33,6 +53,7 @@ namespace kisha::engine {
     bool missing_async_compute = false;
     bool missing_dedicated_transfer = false;
     bool discrete_gpu_required = false;
+    void describe(std::string &out) const;
   };
 
   /**
@@ -41,6 +62,7 @@ namespace kisha::engine {
    */
   struct NoSuitableDeviceError {
     std::vector<DeviceRejection> candidates;
+    [[nodiscard]] std::string describe() const;
   };
 }
 #endif //KISHA_ERRORS_HPP

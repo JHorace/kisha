@@ -4,6 +4,7 @@
  */
 #include "engine.hpp"
 #include "engine_init_helpers.hpp"
+#include "logging.hpp"
 
 #include <spdlog/spdlog.h>
 #include <spdlog/fmt/ranges.h>
@@ -66,7 +67,13 @@ namespace kisha::engine {
             debug_messenger = vk::raii::DebugUtilsMessengerEXT(instance, debug_create_info);
           }
 
-
+          const vk::raii::PhysicalDevices physical_devices(instance);
+          const std::expected<util::DeviceSelection, NoSuitableDeviceError> device_selection =
+              util::select_physical_device(physical_devices, device_spec);
+          if (!device_selection) {
+            log_error(device_selection.error());
+            return std::unexpected(EngineInitError::NoSuitableDevice);
+          }
 
           return std::unexpected(EngineInitError::NotImplemented);
         });

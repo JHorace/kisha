@@ -3,4 +3,5 @@ target_sources(
         PRIVATE
         engine.cpp
         engine_init_helpers.cpp
+        errors.cpp
 )
