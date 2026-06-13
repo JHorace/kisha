@@ -6,7 +6,7 @@
 #define KISHA_ERRORS_HPP
 
 namespace kisha::engine {
-  enum class EngineInitError : std::uint8_t {
+  enum class EngineInitError : uint8_t {
     Unknown = 0U,
     API_VERSION_TOO_LOW,
   };
