@@ -39,26 +39,11 @@ if(NOT TARGET GPUOpen::VulkanMemoryAllocator)
     message(FATAL_ERROR "Unable to resolve VulkanMemoryAllocator target")
 endif()
 
-find_package(fmt CONFIG QUIET)
-if(NOT TARGET fmt::fmt)
-    FetchContent_Declare(
-            fmt
-            GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-            GIT_TAG 11.0.2
-            GIT_SHALLOW TRUE
-    )
-    FetchContent_MakeAvailable(fmt)
-endif()
-if(NOT TARGET fmt::fmt)
-    message(FATAL_ERROR "Unable to resolve fmt target.")
-endif()
-
 find_package(spdlog CONFIG QUIET)
 if(NOT TARGET spdlog::spdlog)
     set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "Disable spdlog examples." FORCE)
     set(SPDLOG_BUILD_TESTS OFF CACHE BOOL "Disable spdlog tests." FORCE)
     set(SPDLOG_BUILD_BENCH OFF CACHE BOOL "Disable spdlog benchmarks." FORCE)
-    set(SPDLOG_FMT_EXTERNAL ON CACHE BOOL "Use external fmt target." FORCE)
     FetchContent_Declare(
             spdlog
             GIT_REPOSITORY https://github.com/gabime/spdlog.git
@@ -83,7 +68,6 @@ target_link_libraries(
         Vulkan::Vulkan
         glm::glm
         GPUOpen::VulkanMemoryAllocator
-        fmt::fmt
         spdlog::spdlog
 )
 
