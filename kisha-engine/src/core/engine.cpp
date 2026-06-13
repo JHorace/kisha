@@ -66,8 +66,7 @@ namespace kisha::engine {
             debug_messenger = vk::raii::DebugUtilsMessengerEXT(instance, debug_create_info);
           }
 
-          const std::vector<std::string> &required_device_extensions = device_spec.required_extensions;
-          (void)required_device_extensions;
+
 
           return std::unexpected(EngineInitError::NotImplemented);
         });

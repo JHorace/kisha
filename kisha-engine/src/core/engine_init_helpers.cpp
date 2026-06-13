@@ -149,12 +149,83 @@ namespace kisha::engine::util {
 
     const vk::InstanceCreateInfo instance_create_info = vk::InstanceCreateInfo{}
         .setPApplicationInfo(&application_info)
-        .setEnabledLayerCount(static_cast<std::uint32_t>(instance_layer_ptrs.size()))
+        .setEnabledLayerCount(std::uint32_t(instance_layer_ptrs.size()))
         .setPpEnabledLayerNames(instance_layer_ptrs.data())
-        .setEnabledExtensionCount(static_cast<std::uint32_t>(instance_extension_ptrs.size()))
+        .setEnabledExtensionCount(std::uint32_t(instance_extension_ptrs.size()))
         .setPpEnabledExtensionNames(instance_extension_ptrs.data());
 
     return vk::raii::Instance(context, instance_create_info);
+  }
+
+std::expected<QueueSelection, EngineInitError> select_queue_families(const vk::raii::PhysicalDevice &physical_device) {
+  const std::vector<vk::QueueFamilyProperties> queue_properties = physical_device.getQueueFamilyProperties();
+
+  std::optional<std::uint32_t> graphics_family;
+  std::optional<std::uint32_t> dedicated_compute_family;
+  std::optional<std::uint32_t> fallback_compute_family;
+  std::optional<std::uint32_t> dedicated_transfer_family;
+  std::optional<std::uint32_t> fallback_transfer_family;
+
+  for (std::uint32_t family_index = 0; family_index < queue_properties.size(); ++family_index) {
+    const vk::QueueFlags flags = queue_properties[family_index].queueFlags;
+
+    if (!graphics_family.has_value() && flags & vk::QueueFlagBits::eGraphics) {
+      graphics_family = family_index;
+    }
+
+    if (flags & vk::QueueFlagBits::eCompute) {
+      if (!(flags & vk::QueueFlagBits::eGraphics)) {
+        if (!dedicated_compute_family.has_value()) {
+          dedicated_compute_family = family_index;
+        }
+      } else if (!fallback_compute_family.has_value()) {
+        fallback_compute_family = family_index;
+      }
+    }
+
+    if (flags & vk::QueueFlagBits::eTransfer) {
+      const bool has_graphics = bool(flags & vk::QueueFlagBits::eGraphics);
+      const bool has_compute = bool(flags & vk::QueueFlagBits::eCompute);
+      if (!has_graphics && !has_compute) {
+        if (!dedicated_transfer_family.has_value()) {
+          dedicated_transfer_family = family_index;
+        }
+      } else if (!fallback_transfer_family.has_value()) {
+        fallback_transfer_family = family_index;
+      }
+    }
+  }
+
+  if (!graphics_family.has_value()) {
+    return std::unexpected(EngineInitError::NoSuitableQueueFamily);
+  }
+
+  const std::optional<std::uint32_t> async_compute_family =
+    dedicated_compute_family
+      .or_else([&] { return fallback_compute_family; })
+      .or_else([&] { return graphics_family; });
+
+  const std::optional<std::uint32_t> transfer_family =
+    dedicated_transfer_family
+      .or_else([&] { return fallback_transfer_family; })
+      .or_else([&] { return async_compute_family; })
+      .or_else([&] { return graphics_family; });
+
+  return QueueSelection{
+    .indices =
+      QueueFamilyIndices{
+        .graphics = *graphics_family,
+        .async_compute = async_compute_family,
+        .transfer = transfer_family,
+      },
+    .has_dedicated_async_compute = dedicated_compute_family.has_value(),
+    .has_dedicated_transfer = dedicated_transfer_family.has_value(),
+  };
+}
+  
+DeviceSelection select_physical_device(const vk::raii::PhysicalDevices &physical_devices,
+                                       const DeviceSpec &device_spec) {
+    return {};
   }
 
   VKAPI_ATTR VkBool32 VKAPI_CALL vulkan_debug_callback(const VkDebugUtilsMessageSeverityFlagBitsEXT severity, const VkDebugUtilsMessageTypeFlagsEXT message_type,
@@ -162,11 +233,11 @@ namespace kisha::engine::util {
   ) {
     const char *message = (callback_data != nullptr && callback_data->pMessage != nullptr) ? callback_data->pMessage : "<no message>";
     if ((severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0U) {
-      spdlog::error("Vulkan validation [{:#x}]: {}", static_cast<std::uint32_t>(message_type), message);
+      spdlog::error("Vulkan validation [{:#x}]: {}", std::uint32_t(message_type), message);
     } else if ((severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) != 0U) {
-      spdlog::warn("Vulkan validation [{:#x}]: {}", static_cast<std::uint32_t>(message_type), message);
+      spdlog::warn("Vulkan validation [{:#x}]: {}", std::uint32_t(message_type), message);
     } else {
-      spdlog::info("Vulkan validation [{:#x}]: {}", static_cast<std::uint32_t>(message_type), message);
+      spdlog::info("Vulkan validation [{:#x}]: {}", std::uint32_t(message_type), message);
     }
     return VK_FALSE;
   }

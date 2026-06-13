@@ -13,6 +13,15 @@
 
 namespace kisha::engine {
   /**
+   * @brief Queue-family indices chosen for the device.
+   */
+  struct QueueFamilyIndices {
+    std::uint32_t graphics = 0;
+    std::optional<std::uint32_t> async_compute;
+    std::optional<std::uint32_t> transfer;
+  };
+
+  /**
    * @brief Requirements either the app or the engine imposes on instance creation.
    * The engine will reconcile its internal requirements with the app's.
    */

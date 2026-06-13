@@ -12,6 +12,7 @@ namespace kisha::engine {
     ApiVersionTooLow,
     MissingRequiredLayers,
     MissingRequiredExtensions,
+    NoSuitableQueueFamily,
   };
 
   struct MissingNamesError {
