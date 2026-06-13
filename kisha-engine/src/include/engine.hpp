@@ -13,25 +13,49 @@
 
 namespace kisha::engine {
   /**
-   * @brief requested device profile capabilities before physical device selection.
+   * @brief Requirements either the app or the engine imposes on instance creation.
+   * The engine will reconcile its internal requirements with the app's.
    */
-  struct DeviceProfileRequest {
+  struct InstanceSpec {
     std::vector<std::string> required_extensions;
     std::vector<std::string> optional_extensions;
+    std::vector<std::string> required_layers;
+    std::vector<std::string> optional_layers;
+    std::uint32_t min_api_version = VK_API_VERSION_1_0;
   };
+
+  /**
+   * @brief Requirements either the app or the engine imposes on device creation.
+   * The engine will reconcile its internal requirements with the app's.
+   */
+  struct DeviceSpec {
+    std::vector<std::string> required_extensions;
+    std::vector<std::string> optional_extensions;
+    bool require_discrete_gpu = true;
+    bool require_async_compute = false;
+    bool require_dedicated_transfer = false;
+  };
+  /**
+   * @brief Actual configuration of the engine after initialization.
+   */
+  struct EngineProfile {
+    std::string device_name;
+    vk::PhysicalDeviceType device_type = vk::PhysicalDeviceType::eOther;
+    std::uint32_t vendor_id = 0U;
+    std::uint32_t device_id = 0U;
+    std::uint32_t api_version = VK_API_VERSION_1_0;
+    std::vector<std::string> enabled_extensions;
+    std::vector<std::string> missing_optional_extensions;
+  };
+
 
   struct EngineCreateInfo {
     std::string application_name;
     uint32_t application_version = VK_MAKE_API_VERSION(0, 0, 1, 0);
     uint32_t engine_version = VK_MAKE_API_VERSION(0, 0, 1, 0);
-    uint32_t api_version = VK_API_VERSION_1_3;
     bool enable_validation = false;
-    bool require_discrete_gpu = true;
-    bool require_async_compute = false;
-    bool require_dedicated_transfer = false;
-    std::vector<std::string> required_instance_extensions;
-    std::vector<std::string> required_instance_layers;
-    DeviceProfileRequest device_profile;
+    InstanceSpec instance_spec;
+    DeviceSpec device_spec;
   };
 
   /**

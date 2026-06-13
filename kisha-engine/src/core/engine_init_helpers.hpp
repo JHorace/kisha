@@ -5,7 +5,12 @@
 #ifndef KISHA_ENGINE_INIT_HELPERS_HPP
 #define KISHA_ENGINE_INIT_HELPERS_HPP
 
+#include "engine.hpp"
+
 namespace kisha::engine::util {
+
+  [[nodiscard]] InstanceSpec reconcile(const InstanceSpec &engine, const InstanceSpec &app);
+  [[nodiscard]] DeviceSpec reconcile(const DeviceSpec &engine, const DeviceSpec &app);
 
   void append_unique(std::vector<std::string> *names, std::string_view name);
   std::vector<const char *> to_c_string_ptrs(const std::vector<std::string> &names);

@@ -16,21 +16,23 @@ namespace {
 
 }
 
-TEST_CASE("Engine init enforces Vulkan 1.3+ baseline", "[engine][core]") {
-  const kisha::engine::EngineCreateInfo create_info{
-    .api_version = VK_API_VERSION_1_2
-  };
+TEST_CASE("Engine baseline raises an app api version below 1.3", "[engine][core][gpu]") {
+  // The engine baseline requires Vulkan 1.3, and reconciliation takes the max,
+  // so an app requesting 1.2 is bumped to 1.3 rather than failing ApiVersionTooLow.
+  kisha::engine::EngineCreateInfo create_info{};
+  create_info.instance_spec.min_api_version = VK_API_VERSION_1_2;
 
   const std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> result =
     kisha::engine::EngineCore::create(create_info);
 
   REQUIRE_FALSE(result.has_value());
-  REQUIRE(result.error() == kisha::engine::EngineInitError::ApiVersionTooLow);
+  REQUIRE(result.error() != kisha::engine::EngineInitError::ApiVersionTooLow);
 }
 
 TEST_CASE("Engine init reports missing required instance layers", "[engine][core]") {
   kisha::engine::EngineCreateInfo create_info{};
-  create_info.required_instance_layers = {"VK_LAYER_KISHA_definitely_does_not_exist"};
+  create_info.instance_spec.min_api_version = VK_API_VERSION_1_3;
+  create_info.instance_spec.required_layers = {"VK_LAYER_KISHA_definitely_does_not_exist"};
 
   const std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> result =
     kisha::engine::EngineCore::create(create_info);
@@ -41,13 +43,62 @@ TEST_CASE("Engine init reports missing required instance layers", "[engine][core
 
 TEST_CASE("Engine init reports missing required instance extensions", "[engine][core]") {
   kisha::engine::EngineCreateInfo create_info{};
-  create_info.required_instance_extensions = {"VK_KISHA_definitely_does_not_exist_extension"};
+  create_info.instance_spec.min_api_version = VK_API_VERSION_1_3;
+  create_info.instance_spec.required_extensions = {"VK_KISHA_definitely_does_not_exist_extension"};
 
   const std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> result =
     kisha::engine::EngineCore::create(create_info);
 
   REQUIRE_FALSE(result.has_value());
   REQUIRE(result.error() == kisha::engine::EngineInitError::MissingRequiredExtensions);
+}
+
+TEST_CASE("reconcile(InstanceSpec) unions names and takes max api version", "[engine][core]") {
+  kisha::engine::InstanceSpec engine_spec{};
+  engine_spec.required_extensions = {"VK_EXT_a", "VK_EXT_shared"};
+  engine_spec.optional_extensions = {"VK_EXT_opt_engine"};
+  engine_spec.required_layers = {"VK_LAYER_engine"};
+  engine_spec.optional_layers = {"VK_LAYER_opt_shared"};
+  engine_spec.min_api_version = VK_API_VERSION_1_3;
+
+  kisha::engine::InstanceSpec app_spec{};
+  app_spec.required_extensions = {"VK_EXT_shared", "VK_EXT_b"};
+  app_spec.optional_extensions = {"VK_EXT_opt_app"};
+  app_spec.required_layers = {"VK_LAYER_app"};
+  app_spec.optional_layers = {"VK_LAYER_opt_shared"};
+  app_spec.min_api_version = VK_API_VERSION_1_2;
+
+  const kisha::engine::InstanceSpec result = kisha::engine::util::reconcile(engine_spec, app_spec);
+
+  REQUIRE(result.required_extensions == std::vector<std::string>{"VK_EXT_a", "VK_EXT_shared", "VK_EXT_b"});
+  REQUIRE(result.optional_extensions == std::vector<std::string>{"VK_EXT_opt_engine", "VK_EXT_opt_app"});
+  REQUIRE(result.required_layers == std::vector<std::string>{"VK_LAYER_engine", "VK_LAYER_app"});
+  REQUIRE(result.optional_layers == std::vector<std::string>{"VK_LAYER_opt_shared"});
+  REQUIRE(result.min_api_version == VK_API_VERSION_1_3);
+}
+
+TEST_CASE("reconcile(DeviceSpec) unions extensions and ORs capability flags", "[engine][core]") {
+  kisha::engine::DeviceSpec engine_spec{};
+  engine_spec.required_extensions = {"VK_KHR_a", "VK_KHR_shared"};
+  engine_spec.optional_extensions = {"VK_KHR_opt_engine"};
+  engine_spec.require_discrete_gpu = false;
+  engine_spec.require_async_compute = true;
+  engine_spec.require_dedicated_transfer = false;
+
+  kisha::engine::DeviceSpec app_spec{};
+  app_spec.required_extensions = {"VK_KHR_shared", "VK_KHR_b"};
+  app_spec.optional_extensions = {"VK_KHR_opt_app"};
+  app_spec.require_discrete_gpu = true;
+  app_spec.require_async_compute = false;
+  app_spec.require_dedicated_transfer = false;
+
+  const kisha::engine::DeviceSpec result = kisha::engine::util::reconcile(engine_spec, app_spec);
+
+  REQUIRE(result.required_extensions == std::vector<std::string>{"VK_KHR_a", "VK_KHR_shared", "VK_KHR_b"});
+  REQUIRE(result.optional_extensions == std::vector<std::string>{"VK_KHR_opt_engine", "VK_KHR_opt_app"});
+  REQUIRE(result.require_discrete_gpu);
+  REQUIRE(result.require_async_compute);
+  REQUIRE_FALSE(result.require_dedicated_transfer);
 }
 
 TEST_CASE("create_instance succeeds with default requirements", "[engine][core][gpu]") {

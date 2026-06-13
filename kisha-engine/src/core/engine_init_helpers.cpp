@@ -2,6 +2,7 @@
 // Created by jsumihiro on 6/12/26.
 //
 
+#include <algorithm>
 #include <expected>
 #include <optional>
 #include <ranges>
@@ -57,6 +58,32 @@ namespace kisha::engine::util {
     }
   }
 
+  InstanceSpec reconcile(const InstanceSpec &engine, const InstanceSpec &app) {
+    InstanceSpec result = engine;
+    for (const std::string &name : app.required_extensions)
+      append_unique(&result.required_extensions, name);
+    for (const std::string &name : app.optional_extensions)
+      append_unique(&result.optional_extensions, name);
+    for (const std::string &name : app.required_layers)
+      append_unique(&result.required_layers, name);
+    for (const std::string &name : app.optional_layers)
+      append_unique(&result.optional_layers, name);
+    result.min_api_version = std::max(engine.min_api_version, app.min_api_version);
+    return result;
+  }
+
+  DeviceSpec reconcile(const DeviceSpec &engine, const DeviceSpec &app) {
+    DeviceSpec result = engine;
+    for (const std::string &name : app.required_extensions)
+      append_unique(&result.required_extensions, name);
+    for (const std::string &name : app.optional_extensions)
+      append_unique(&result.optional_extensions, name);
+    result.require_discrete_gpu = engine.require_discrete_gpu || app.require_discrete_gpu;
+    result.require_async_compute = engine.require_async_compute || app.require_async_compute;
+    result.require_dedicated_transfer = engine.require_dedicated_transfer || app.require_dedicated_transfer;
+    return result;
+  }
+
   void append_unique(std::vector<std::string> *names, const std::string_view name) {
     const bool exists = std::ranges::any_of(*names, [&](const std::string &existing) { return existing == name; });
     if (!exists) {
@@ -100,7 +127,7 @@ namespace kisha::engine::util {
 
     if (!missing.empty())
       return std::unexpected(MissingNamesError{std::move(missing)});
-    return {};   // success, no payload
+    return {};
   }
 
   std::expected<vk::raii::Instance, EngineInitError> create_instance(const vk::raii::Context &context,
