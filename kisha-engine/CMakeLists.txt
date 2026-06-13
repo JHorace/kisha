@@ -44,19 +44,6 @@ endif()
 ##### Testing
 
 if(BUILD_TESTING)
-#    find_package(Catch2 3 CONFIG QUIET)
-#    if(NOT Catch2_FOUND)
-#        FetchContent_Declare(
-#                Catch2
-#                GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-#                GIT_TAG v3.6.0
-#                GIT_SHALLOW TRUE
-#        )
-#        FetchContent_MakeAvailable(Catch2)
-#    endif()
-#    if(NOT TARGET Catch2::Catch2WithMain)
-#        message(FATAL_ERROR "Unable to resolve Catch2::Catch2WithMain target.")
-#    endif()
 
     if(NOT TARGET kisha_engine_test_dependencies)
         add_library(kisha_engine_test_dependencies INTERFACE)
