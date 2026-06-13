@@ -223,8 +223,8 @@ std::expected<QueueSelection, EngineInitError> select_queue_families(const vk::r
   };
 }
   
-std::expected<DeviceSelection, EngineInitError> select_physical_device(const vk::raii::PhysicalDevices &physical_devices,
-                                                                       const DeviceSpec &device_spec) {
+std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(const vk::raii::PhysicalDevices &physical_devices,
+                                                                            const DeviceSpec &device_spec) {
   struct Candidate {
     std::size_t index = 0U;
     vk::PhysicalDeviceType type = vk::PhysicalDeviceType::eOther;
@@ -236,6 +236,8 @@ std::expected<DeviceSelection, EngineInitError> select_physical_device(const vk:
 
   std::vector<Candidate> discrete_candidates;
   std::vector<Candidate> integrated_candidates;
+  // Diagnostics for every device that was considered but rejected.
+  std::vector<DeviceRejection> rejected;
 
   for (std::size_t index = 0U; index < physical_devices.size(); ++index) {
     const vk::raii::PhysicalDevice &physical_device = physical_devices[index];
@@ -247,28 +249,43 @@ std::expected<DeviceSelection, EngineInitError> select_physical_device(const vk:
       continue;
     }
 
+    DeviceRejection rejection{
+      .device_name = std::string(properties.deviceName),
+      .device_type = vk::to_string(properties.deviceType),
+    };
+
     if (std::vector<std::string> missing_features = physical_device_missing_features(physical_device); !missing_features.empty()) {
-      spdlog::debug("Skipping device '{}': missing required features: {}", std::string(properties.deviceName), missing_features);
+      spdlog::debug("Skipping device '{}': missing required features: {}", rejection.device_name, missing_features);
+      rejection.missing_features = std::move(missing_features);
+      rejected.push_back(std::move(rejection));
       continue;
     }
 
     const std::vector<std::string> available_extensions = enumerate_device_extension_names(physical_device);
     if (auto r = validate_required_names(available_extensions, device_spec.required_extensions); !r) {
-      spdlog::debug("Skipping device '{}': missing required extensions: {}", std::string(properties.deviceName), r.error().missing_names);
+      spdlog::debug("Skipping device '{}': missing required extensions: {}", rejection.device_name, r.error().missing_names);
+      rejection.missing_required_extensions = std::move(r.error().missing_names);
+      rejected.push_back(std::move(rejection));
       continue;
     }
 
     const std::expected<QueueSelection, EngineInitError> queues = select_queue_families(physical_device);
     if (!queues) {
-      spdlog::debug("Skipping device '{}': no suitable queue families", std::string(properties.deviceName));
+      spdlog::debug("Skipping device '{}': no suitable queue families", rejection.device_name);
+      rejection.no_suitable_queue_family = true;
+      rejected.push_back(std::move(rejection));
       continue;
     }
     if (device_spec.require_async_compute && !queues->has_dedicated_async_compute) {
-      spdlog::debug("Skipping device '{}': no dedicated async-compute queue family", std::string(properties.deviceName));
+      spdlog::debug("Skipping device '{}': no dedicated async-compute queue family", rejection.device_name);
+      rejection.missing_async_compute = true;
+      rejected.push_back(std::move(rejection));
       continue;
     }
     if (device_spec.require_dedicated_transfer && !queues->has_dedicated_transfer) {
-      spdlog::debug("Skipping device '{}': no dedicated transfer queue family", std::string(properties.deviceName));
+      spdlog::debug("Skipping device '{}': no dedicated transfer queue family", rejection.device_name);
+      rejection.missing_dedicated_transfer = true;
+      rejected.push_back(std::move(rejection));
       continue;
     }
 
@@ -315,26 +332,36 @@ std::expected<DeviceSelection, EngineInitError> select_physical_device(const vk:
 
   const Candidate *selected = best_by_optional(discrete_candidates);
 
-  if (selected == nullptr) {
-    if (device_spec.require_discrete_gpu) {
-      spdlog::error("No suitable discrete GPU found");
-      return std::unexpected(EngineInitError::NoSuitableDevice);
-    }
+  if (selected == nullptr && !device_spec.require_discrete_gpu) {
     // Only fall back to an integrated GPU when a discrete one is not required and none is suitable.
     selected = best_by_optional(integrated_candidates);
   }
 
-  if (selected == nullptr) {
-    spdlog::error("No suitable physical device found");
-    return std::unexpected(EngineInitError::NoSuitableDevice);
+  if (selected != nullptr) {
+    return DeviceSelection{
+      .index = selected->index,
+      .queues = selected->queues,
+      .enabled_extensions = selected->enabled_extensions,
+      .missing_optional_extensions = selected->missing_optional_extensions,
+    };
   }
 
-  return DeviceSelection{
-    .index = selected->index,
-    .queues = selected->queues,
-    .enabled_extensions = selected->enabled_extensions,
-    .missing_optional_extensions = selected->missing_optional_extensions,
-  };
+  // No device was selected: any otherwise-suitable integrated GPU was rejected
+  // solely because a discrete GPU is required.
+  if (device_spec.require_discrete_gpu) {
+    for (const Candidate &candidate : integrated_candidates) {
+      const vk::raii::PhysicalDevice &physical_device = physical_devices[candidate.index];
+      const vk::PhysicalDeviceProperties properties = physical_device.getProperties();
+      rejected.push_back(DeviceRejection{
+        .device_name = std::string(properties.deviceName),
+        .device_type = vk::to_string(properties.deviceType),
+        .discrete_gpu_required = true,
+      });
+    }
+  }
+
+  spdlog::error("No suitable physical device found among {} candidate(s)", rejected.size());
+  return std::unexpected(NoSuitableDeviceError{.candidates = std::move(rejected)});
 }
 
   VKAPI_ATTR VkBool32 VKAPI_CALL vulkan_debug_callback(const VkDebugUtilsMessageSeverityFlagBitsEXT severity, const VkDebugUtilsMessageTypeFlagsEXT message_type,
