@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "engine.hpp"
+#include "engine_init_helpers.hpp"
 
 namespace {
 
@@ -47,4 +48,16 @@ TEST_CASE("Engine init reports missing required instance extensions", "[engine][
 
   REQUIRE_FALSE(result.has_value());
   REQUIRE(result.error() == kisha::engine::EngineInitError::MissingRequiredExtensions);
+}
+
+TEST_CASE("create_instance succeeds with default requirements", "[engine][core][gpu]") {
+  const vk::raii::Context context;
+  const vk::ApplicationInfo application_info = vk::ApplicationInfo{}
+      .setApiVersion(VK_API_VERSION_1_3);
+
+  const std::expected<vk::raii::Instance, kisha::engine::EngineInitError> result =
+    kisha::engine::util::create_instance(context, application_info, {}, {});
+
+  REQUIRE(result.has_value());
+  REQUIRE(static_cast<VkInstance>(**result) != VK_NULL_HANDLE);
 }

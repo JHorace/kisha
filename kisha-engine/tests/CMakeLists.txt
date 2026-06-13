@@ -6,5 +6,10 @@ target_link_libraries(
         kisha_engine
         kisha::engine_test_dependencies
 )
+target_include_directories(
+        kisha_engine_tests
+        PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/../src/core"
+)
 
 add_test(NAME kisha_engine_tests COMMAND kisha_engine_tests)

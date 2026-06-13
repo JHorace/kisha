@@ -10,7 +10,11 @@
 #include <vector>
 #include <vulkan/vulkan_raii.hpp>
 
+#include <spdlog/spdlog.h>
+#include <spdlog/fmt/ranges.h>
+
 #include "errors.hpp"
+#include "engine_init_helpers.hpp"
 
 namespace kisha::engine::util {
   namespace {
@@ -97,5 +101,32 @@ namespace kisha::engine::util {
     if (!missing.empty())
       return std::unexpected(MissingNamesError{std::move(missing)});
     return {};   // success, no payload
+  }
+
+  std::expected<vk::raii::Instance, EngineInitError> create_instance(const vk::raii::Context &context,
+                                                                     const vk::ApplicationInfo &application_info,
+                                                                     const std::vector<std::string> &required_layers,
+                                                                     const std::vector<std::string> &required_extensions) {
+    if (auto r = validate_required_names(enumerate_instance_layer_names(context), required_layers); !r) {
+      spdlog::error("Missing required Vulkan instance layers: {}", r.error().missing_names);
+      return std::unexpected(EngineInitError::MissingRequiredLayers);
+    }
+
+    if (auto r = validate_required_names(enumerate_instance_extension_names(context), required_extensions); !r) {
+      spdlog::error("Missing required Vulkan instance extensions: {}", r.error().missing_names);
+      return std::unexpected(EngineInitError::MissingRequiredExtensions);
+    }
+
+    const std::vector<const char *> instance_layer_ptrs = to_c_string_ptrs(required_layers);
+    const std::vector<const char *> instance_extension_ptrs = to_c_string_ptrs(required_extensions);
+
+    const vk::InstanceCreateInfo instance_create_info = vk::InstanceCreateInfo{}
+        .setPApplicationInfo(&application_info)
+        .setEnabledLayerCount(static_cast<std::uint32_t>(instance_layer_ptrs.size()))
+        .setPpEnabledLayerNames(instance_layer_ptrs.data())
+        .setEnabledExtensionCount(static_cast<std::uint32_t>(instance_extension_ptrs.size()))
+        .setPpEnabledExtensionNames(instance_extension_ptrs.data());
+
+    return vk::raii::Instance(context, instance_create_info);
   }
 }

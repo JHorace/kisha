@@ -13,6 +13,10 @@ namespace kisha::engine::util {
   std::vector<std::string> enumerate_instance_layer_names(const vk::raii::Context &context);
   std::vector<std::string> enumerate_device_extension_names(const vk::raii::PhysicalDevice &physical_device);
   [[nodiscard]] std::expected<void, MissingNamesError> validate_required_names(const std::vector<std::string> &available, const std::vector<std::string> &required);
+  [[nodiscard]] std::expected<vk::raii::Instance, EngineInitError> create_instance(const vk::raii::Context &context,
+                                                                                   const vk::ApplicationInfo &application_info,
+                                                                                   const std::vector<std::string> &required_layers,
+                                                                                   const std::vector<std::string> &required_extensions);
 }
 
 #endif //KISHA_ENGINE_INIT_HELPERS_HPP
