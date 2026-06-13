@@ -8,7 +8,8 @@
 namespace kisha::engine {
   enum class EngineInitError : uint8_t {
     Unknown = 0U,
-    API_VERSION_TOO_LOW,
+    NotImplemented,
+    ApiVersionTooLow,
     MissingRequiredLayers,
     MissingRequiredExtensions,
   };

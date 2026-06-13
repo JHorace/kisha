@@ -25,7 +25,7 @@ TEST_CASE("Engine init enforces Vulkan 1.3+ baseline", "[engine][core]") {
     kisha::engine::EngineCore::create(create_info);
 
   REQUIRE_FALSE(result.has_value());
-  REQUIRE(result.error() == kisha::engine::EngineInitError::API_VERSION_TOO_LOW);
+  REQUIRE(result.error() == kisha::engine::EngineInitError::ApiVersionTooLow);
 }
 
 TEST_CASE("Engine init reports missing required instance layers", "[engine][core]") {

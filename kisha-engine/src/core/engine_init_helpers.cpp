@@ -129,4 +129,18 @@ namespace kisha::engine::util {
 
     return vk::raii::Instance(context, instance_create_info);
   }
+
+  VKAPI_ATTR VkBool32 VKAPI_CALL vulkan_debug_callback(const VkDebugUtilsMessageSeverityFlagBitsEXT severity, const VkDebugUtilsMessageTypeFlagsEXT message_type,
+                                                       const VkDebugUtilsMessengerCallbackDataEXT *callback_data, void * /*user_data*/
+  ) {
+    const char *message = (callback_data != nullptr && callback_data->pMessage != nullptr) ? callback_data->pMessage : "<no message>";
+    if ((severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0U) {
+      spdlog::error("Vulkan validation [{:#x}]: {}", static_cast<std::uint32_t>(message_type), message);
+    } else if ((severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) != 0U) {
+      spdlog::warn("Vulkan validation [{:#x}]: {}", static_cast<std::uint32_t>(message_type), message);
+    } else {
+      spdlog::info("Vulkan validation [{:#x}]: {}", static_cast<std::uint32_t>(message_type), message);
+    }
+    return VK_FALSE;
+  }
 }

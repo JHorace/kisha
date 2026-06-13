@@ -11,7 +11,7 @@
 namespace kisha::engine {
   std::expected<EngineCore, EngineInitError> EngineCore::create(const EngineCreateInfo &create_info) {
     if (create_info.api_version < VK_API_VERSION_1_3) {
-      return std::unexpected(EngineInitError::API_VERSION_TOO_LOW);
+      return std::unexpected(EngineInitError::ApiVersionTooLow);
     }
 
     vk::raii::Context context;
@@ -22,7 +22,7 @@ namespace kisha::engine {
       util::append_unique(&required_layers, "VK_LAYER_KHRONOS_validation");
       util::append_unique(&required_instance_extensions, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     }
-    
+
     const vk::ApplicationInfo application_info = vk::ApplicationInfo{}
         .setPApplicationName(create_info.application_name.c_str())
         .setApplicationVersion(create_info.application_version)
@@ -30,12 +30,21 @@ namespace kisha::engine {
         .setEngineVersion(create_info.engine_version)
         .setApiVersion(create_info.api_version);
 
-    auto instance = util::create_instance(context, application_info, required_layers, required_instance_extensions);
-    if (!instance) {
-      return std::unexpected(instance.error());
-    }
-
-
-    return std::unexpected(EngineInitError::API_VERSION_TOO_LOW);
+    return util::create_instance(context, application_info, required_layers, required_instance_extensions)
+        .and_then([&](vk::raii::Instance instance) -> std::expected<EngineCore, EngineInitError> {
+          vk::raii::DebugUtilsMessengerEXT debug_messenger{nullptr};
+          if (create_info.enable_validation) {
+            if (create_info.enable_validation) {
+              const vk::DebugUtilsMessengerCreateInfoEXT debug_create_info =
+                  vk::DebugUtilsMessengerCreateInfoEXT{}
+                  .setMessageSeverity(vk::DebugUtilsMessageSeverityFlagBitsEXT::eError | vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning)
+                  .setMessageType(vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
+                                  vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance)
+                  .setPfnUserCallback(vk::PFN_DebugUtilsMessengerCallbackEXT(&util::vulkan_debug_callback));
+              debug_messenger = vk::raii::DebugUtilsMessengerEXT(instance, debug_create_info);
+            }
+          }
+          return std::unexpected(EngineInitError::NotImplemented);
+        });
   }
 }

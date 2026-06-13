@@ -17,6 +17,8 @@ namespace kisha::engine::util {
                                                                                    const vk::ApplicationInfo &application_info,
                                                                                    const std::vector<std::string> &required_layers,
                                                                                    const std::vector<std::string> &required_extensions);
+  VKAPI_ATTR VkBool32 VKAPI_CALL vulkan_debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT message_type,
+                                                       const VkDebugUtilsMessengerCallbackDataEXT *callback_data, void *user_data);
 }
 
 #endif //KISHA_ENGINE_INIT_HELPERS_HPP
