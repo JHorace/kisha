@@ -10,6 +10,7 @@
 #include <unordered_set>
 #include <vector>
 #include <vulkan/vulkan_raii.hpp>
+#include <vulkan/vulkan_profiles.hpp>
 
 #include <spdlog/spdlog.h>
 #include <spdlog/fmt/ranges.h>
@@ -69,6 +70,18 @@ namespace kisha::engine::util {
 
       return missing_features;
     }
+  }
+
+  VpProfileProperties engine_profile() {
+    return VpProfileProperties{VP_KISHA_BASELINE_NAME, VP_KISHA_BASELINE_SPEC_VERSION};
+  }
+
+  bool device_supports_profile(const vk::raii::Instance &instance, const vk::raii::PhysicalDevice &physical_device,
+                               const VpProfileProperties &profile) {
+    VkBool32 supported = VK_FALSE;
+    const VkResult result = vpGetPhysicalDeviceProfileSupport(static_cast<VkInstance>(*instance),
+                                                              static_cast<VkPhysicalDevice>(*physical_device), &profile, &supported);
+    return result == VK_SUCCESS && supported == VK_TRUE;
   }
 
   InstanceSpec reconcile(const InstanceSpec &engine, const InstanceSpec &app) {
@@ -255,8 +268,10 @@ std::expected<QueueSelection, EngineInitError> select_queue_families(const vk::r
   };
 }
   
-std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(const vk::raii::PhysicalDevices &physical_devices,
+std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(const vk::raii::Instance &instance,
+                                                                            const vk::raii::PhysicalDevices &physical_devices,
                                                                             const DeviceSpec &device_spec) {
+  const VpProfileProperties profile = engine_profile();
   struct Candidate {
     std::size_t index = 0U;
     vk::PhysicalDeviceType type = vk::PhysicalDeviceType::eOther;
@@ -286,9 +301,9 @@ std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(con
       .device_type = vk::to_string(properties.deviceType),
     };
 
-    if (std::vector<std::string> missing_features = physical_device_missing_features(physical_device); !missing_features.empty()) {
-      spdlog::debug("Skipping device '{}': missing required features: {}", rejection.device_name, missing_features);
-      rejection.missing_features = std::move(missing_features);
+    if (!device_supports_profile(instance, physical_device, profile)) {
+      spdlog::debug("Skipping device '{}': does not support required profile '{}'", rejection.device_name, profile.profileName);
+      rejection.missing_features = {std::string("profile ") + profile.profileName + " not supported"};
       rejected.push_back(std::move(rejection));
       continue;
     }

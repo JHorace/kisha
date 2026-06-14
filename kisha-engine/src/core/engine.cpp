@@ -91,7 +91,7 @@ namespace kisha::engine {
           }
           vk::raii::PhysicalDevices physical_devices = std::move(*physical_devices_result);
           const std::expected<util::DeviceSelection, NoSuitableDeviceError> device_selection =
-              util::select_physical_device(physical_devices, device_spec);
+              util::select_physical_device(instance, physical_devices, device_spec);
           if (!device_selection) {
             log_error(device_selection.error());
             return std::unexpected(EngineInitError::NoSuitableDevice);

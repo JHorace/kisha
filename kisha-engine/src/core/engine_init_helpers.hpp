@@ -7,6 +7,8 @@
 
 #include "engine.hpp"
 
+#include <vulkan/vulkan_profiles.hpp>
+
 namespace kisha::engine::util {
 
   /**
@@ -42,7 +44,11 @@ namespace kisha::engine::util {
                                                                                    const std::vector<std::string> &required_layers,
                                                                                    const std::vector<std::string> &required_extensions);
   [[nodiscard]] std::expected<QueueSelection, EngineInitError> select_queue_families(const vk::raii::PhysicalDevice &physical_device);
-  [[nodiscard]] std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(const vk::raii::PhysicalDevices &physical_devices,
+  [[nodiscard]] VpProfileProperties engine_profile();
+  [[nodiscard]] bool device_supports_profile(const vk::raii::Instance &instance, const vk::raii::PhysicalDevice &physical_device,
+                                             const VpProfileProperties &profile);
+  [[nodiscard]] std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(const vk::raii::Instance &instance,
+                                                                                            const vk::raii::PhysicalDevices &physical_devices,
                                                                                             const DeviceSpec &device_spec);
   [[nodiscard]] std::vector<vk::DeviceQueueCreateInfo> build_queue_create_infos(const QueueSelection &queues);
   [[nodiscard]] std::expected<vk::raii::Device, EngineInitError> create_logical_device(const vk::raii::PhysicalDevice &physical_device,
