@@ -21,6 +21,8 @@ include(ProjectDependencies)
 include(CommonCompileOptions)
 include(CTest)
 
+add_subdirectory(assets)
+
 if(KISHA_BUILD_ENGINE)
     add_subdirectory(kisha-engine)
 endif()
