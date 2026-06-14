@@ -8,6 +8,7 @@
 
 #include <vulkan/vulkan_raii.hpp>
 #include <expected>
+#include <variant>
 
 #include "errors.hpp"
 
@@ -96,6 +97,73 @@ namespace kisha::engine {
     DeviceSpec device_spec;
   };
 
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+  struct WaylandWindowHandle {
+    wl_display *display = nullptr;
+    wl_surface *surface = nullptr;
+  };
+#endif
+#ifdef VK_USE_PLATFORM_XCB_KHR
+  struct XcbWindowHandle {
+    xcb_connection_t *connection = nullptr;
+    xcb_window_t window{};
+  };
+#endif
+#ifdef VK_USE_PLATFORM_XLIB_KHR
+  struct XlibWindowHandle {
+    Display *display = nullptr;
+    Window window{};
+  };
+#endif
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+  struct Win32WindowHandle {
+    HINSTANCE hinstance = nullptr;
+    HWND hwnd = nullptr;
+  };
+#endif
+
+  /**
+   * @brief A native window handle the engine can create a surface from.
+   * std::monostate represents a headless window
+   */
+  using NativeWindowHandle = std::variant<
+      std::monostate
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+      , WaylandWindowHandle
+#endif
+#ifdef VK_USE_PLATFORM_XCB_KHR
+      , XcbWindowHandle
+#endif
+#ifdef VK_USE_PLATFORM_XLIB_KHR
+      , XlibWindowHandle
+#endif
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+      , Win32WindowHandle
+#endif
+      >;
+
+  /**
+   * @brief Owns the engine-created presentation surface, and eventually the swapchain.
+   */
+  class Presenter {
+  public:
+    // RAII type, so can only be move assigned/constructed.
+    Presenter(Presenter &&other) noexcept = default;
+    Presenter &operator=(Presenter &&other) noexcept = default;
+
+    Presenter(const Presenter &) = delete;
+    Presenter &operator=(const Presenter &) = delete;
+
+    [[nodiscard]] const vk::raii::SurfaceKHR &surface() const { return _surface; }
+
+  private:
+    friend class EngineCore;
+
+    explicit Presenter(vk::raii::SurfaceKHR &&surface) : _surface(std::move(surface)) {}
+
+    vk::raii::SurfaceKHR _surface{nullptr};
+  };
+
   /**
    * @brief Fully initialized Vulkan core context using `vk::raii` ownership.
    */
@@ -120,8 +188,11 @@ namespace kisha::engine {
     [[nodiscard]] const std::vector<DeviceSelection> &device_candidates() const { return _device_candidates; }
     [[nodiscard]] const EngineProfile &profile() const { return _profile; }
 
+    [[nodiscard]] std::expected<Presenter, EngineInitError> create_presenter(const NativeWindowHandle &window_handle);
   private:
     friend class EngineInstance;
+
+    std::expected<void, EngineInitError> reselect_device_for_surface(const vk::raii::SurfaceKHR &surface);
 
     EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance, vk::raii::DebugUtilsMessengerEXT &&debug_messenger,
                vk::raii::PhysicalDevices &&physical_devices, std::vector<DeviceSelection> &&device_candidates,

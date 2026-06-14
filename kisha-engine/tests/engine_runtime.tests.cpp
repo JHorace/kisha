@@ -113,6 +113,21 @@ TEST_CASE("EngineCore exposes a profile matching the active device", "[engine][c
   REQUIRE(profile.missing_optional_extensions == active.missing_optional_extensions);
 }
 
+TEST_CASE("EngineCore::create_presenter fails for an empty (headless) window handle", "[engine][core][gpu]") {
+  // Phase 3: binding a Presenter requires a real native window handle. A default
+  // (monostate / headless) handle has nothing to create a surface from, so the
+  // bind must fail cleanly with SurfaceCreationFailed before touching the device.
+  std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> core =
+    kisha::engine::EngineCore::create();
+  REQUIRE(core.has_value());
+
+  const std::expected<kisha::engine::Presenter, kisha::engine::EngineInitError> presenter =
+    core->create_presenter(kisha::engine::NativeWindowHandle{});
+
+  REQUIRE_FALSE(presenter.has_value());
+  REQUIRE(presenter.error() == kisha::engine::EngineInitError::SurfaceCreationFailed);
+}
+
 TEST_CASE("EngineInstance init reports missing required instance layers", "[engine][core]") {
   kisha::engine::EngineCreateInfo create_info{};
   create_info.instance_spec.min_api_version = VK_API_VERSION_1_3;

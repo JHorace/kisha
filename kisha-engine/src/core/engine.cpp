@@ -74,6 +74,34 @@ namespace kisha::engine {
             return EngineInitError::InstanceCreationFailed;
           });
     }
+
+    struct DeviceBundle {
+      vk::raii::Device device{nullptr};
+      Queues queues{};
+      EngineProfile profile{};
+    };
+
+    EngineProfile build_profile(const vk::PhysicalDeviceProperties &properties, const DeviceSelection &selection) {
+      return EngineProfile{
+        .device_name = std::string(properties.deviceName),
+        .device_type = properties.deviceType,
+        .vendor_id = properties.vendorID,
+        .device_id = properties.deviceID,
+        .api_version = properties.apiVersion,
+        .enabled_extensions = selection.enabled_extensions,
+        .missing_optional_extensions = selection.missing_optional_extensions,
+      };
+    }
+
+    std::expected<DeviceBundle, EngineInitError> build_device_bundle(const vk::raii::PhysicalDevice &physical_device,
+                                                                     const DeviceSelection &selection) {
+      EngineProfile profile = build_profile(physical_device.getProperties(), selection);
+      return util::create_logical_device(physical_device, selection.queues, selection.enabled_extensions)
+          .transform([&](vk::raii::Device device) {
+            Queues queues = util::acquire_queues(device, selection.queues);
+            return DeviceBundle{std::move(device), std::move(queues), std::move(profile)};
+          });
+    }
   }
 
   EngineCore::EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance,
@@ -165,22 +193,66 @@ namespace kisha::engine {
     spdlog::info("Creating logical device on '{}' (graphics family {}, present family {})",
                  std::string(properties.deviceName), selection.queues.indices.graphics, selection.queues.indices.present);
 
-    EngineProfile profile{
-      .device_name = std::string(properties.deviceName),
-      .device_type = properties.deviceType,
-      .vendor_id = properties.vendorID,
-      .device_id = properties.deviceID,
-      .api_version = properties.apiVersion,
-      .enabled_extensions = selection.enabled_extensions,
-      .missing_optional_extensions = selection.missing_optional_extensions,
-    };
-
-    return util::create_logical_device(physical_device, selection.queues, selection.enabled_extensions)
-        .transform([&](vk::raii::Device device) {
-          Queues queues = util::acquire_queues(device, selection.queues);
+    return build_device_bundle(physical_device, selection)
+        .transform([&](DeviceBundle bundle) {
           return EngineCore(std::move(context_), std::move(instance_), std::move(debug_messenger_),
                             std::move(physical_devices_), std::move(device_candidates_), active_candidate_index,
-                            std::move(device), std::move(queues), std::move(profile));
+                            std::move(bundle.device), std::move(bundle.queues), std::move(bundle.profile));
         });
+  }
+
+  std::expected<void, EngineInitError> EngineCore::reselect_device_for_surface(const vk::raii::SurfaceKHR &surface) {
+    for (std::size_t index = 0U; index < _device_candidates.size(); ++index) {
+      if (index == _active_candidate_index) {
+        continue;
+      }
+      const DeviceSelection &candidate = _device_candidates[index];
+      const std::expected<vk::Bool32, vk::Result> supported =
+          _physical_devices[candidate.index].getSurfaceSupportKHR(candidate.queues.indices.present, *surface);
+      if (!supported.has_value() || *supported != VK_TRUE) {
+        continue;
+      }
+
+      std::expected<DeviceBundle, EngineInitError> bundle =
+          build_device_bundle(_physical_devices[candidate.index], candidate);
+      if (!bundle) {
+        return std::unexpected(bundle.error());
+      }
+
+      spdlog::warn("Active device cannot present to the surface; switching to '{}'", bundle->profile.device_name);
+      _queues = std::move(bundle->queues);
+      _profile = std::move(bundle->profile);
+      _device = std::move(bundle->device);
+      _active_candidate_index = index;
+      return {};
+    }
+
+    spdlog::error("No physical-device candidate can present to the requested surface");
+    return std::unexpected(EngineInitError::NoSurfaceCapableDevice);
+  }
+
+  std::expected<Presenter, EngineInitError> EngineCore::create_presenter(const NativeWindowHandle &window_handle) {
+    std::expected<vk::raii::SurfaceKHR, EngineInitError> surface_result = util::create_surface(_instance, window_handle);
+    if (!surface_result) {
+      return std::unexpected(surface_result.error());
+    }
+    vk::raii::SurfaceKHR surface = std::move(*surface_result);
+
+    // confirm the active device's present family can actually present to this concrete surface.
+    const DeviceSelection &active = _device_candidates[_active_candidate_index];
+    const std::expected<vk::Bool32, vk::Result> supported =
+        _physical_devices[active.index].getSurfaceSupportKHR(active.queues.indices.present, *surface);
+    const bool active_supports = supported.has_value() && (*supported == VK_TRUE);
+
+    if (!active_supports) {
+      // Rare: the preferred device cannot present to this surface. Switch to a ranked candidate that can before binding it.
+      std::expected<void, EngineInitError> reselected = reselect_device_for_surface(surface);
+      if (!reselected) {
+        return std::unexpected(reselected.error());
+      }
+    }
+
+    spdlog::info("Created presentation surface (presenting device '{}')", _profile.device_name);
+    return Presenter(std::move(surface));
   }
 }

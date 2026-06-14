@@ -7,7 +7,9 @@
 #include <optional>
 #include <ranges>
 #include <string>
+#include <type_traits>
 #include <unordered_set>
+#include <variant>
 #include <vector>
 #include <vulkan/vulkan_raii.hpp>
 
@@ -477,6 +479,58 @@ std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(con
       result.transfer = device.getQueue(*queues.indices.transfer, 0U);
     }
     return result;
+  }
+
+  std::expected<vk::raii::SurfaceKHR, EngineInitError> create_surface(const vk::raii::Instance &instance,
+                                                                      const NativeWindowHandle &window_handle) {
+    const auto map_error = [](const vk::Result result) {
+      spdlog::error("Failed to create surface: {}", vk::to_string(result));
+      return EngineInitError::SurfaceCreationFailed;
+    };
+
+    return std::visit(
+        [&](const auto &handle) -> std::expected<vk::raii::SurfaceKHR, EngineInitError> {
+          using Handle = std::decay_t<decltype(handle)>;
+          if constexpr (std::is_same_v<Handle, std::monostate>) {
+            spdlog::error("Cannot create a surface from an empty (headless) native window handle");
+            return std::unexpected(EngineInitError::SurfaceCreationFailed);
+          }
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+          else if constexpr (std::is_same_v<Handle, WaylandWindowHandle>) {
+            return instance
+                .createWaylandSurfaceKHR(
+                    vk::WaylandSurfaceCreateInfoKHR{}.setDisplay(handle.display).setSurface(handle.surface))
+                .transform_error(map_error);
+          }
+#endif
+#ifdef VK_USE_PLATFORM_XCB_KHR
+          else if constexpr (std::is_same_v<Handle, XcbWindowHandle>) {
+            return instance
+                .createXcbSurfaceKHR(
+                    vk::XcbSurfaceCreateInfoKHR{}.setConnection(handle.connection).setWindow(handle.window))
+                .transform_error(map_error);
+          }
+#endif
+#ifdef VK_USE_PLATFORM_XLIB_KHR
+          else if constexpr (std::is_same_v<Handle, XlibWindowHandle>) {
+            return instance
+                .createXlibSurfaceKHR(vk::XlibSurfaceCreateInfoKHR{}.setDpy(handle.display).setWindow(handle.window))
+                .transform_error(map_error);
+          }
+#endif
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+          else if constexpr (std::is_same_v<Handle, Win32WindowHandle>) {
+            return instance
+                .createWin32SurfaceKHR(
+                    vk::Win32SurfaceCreateInfoKHR{}.setHinstance(handle.hinstance).setHwnd(handle.hwnd))
+                .transform_error(map_error);
+          }
+#endif
+          else {
+            return std::unexpected(EngineInitError::SurfaceCreationFailed);
+          }
+        },
+        window_handle);
   }
 
   VKAPI_ATTR VkBool32 VKAPI_CALL vulkan_debug_callback(const VkDebugUtilsMessageSeverityFlagBitsEXT severity, const VkDebugUtilsMessageTypeFlagsEXT message_type,
