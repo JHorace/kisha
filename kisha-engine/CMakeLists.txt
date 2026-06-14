@@ -1,7 +1,5 @@
 include(FetchContent)
 
-
-
 ### This CMakeLists.txt just handles the engine dependencies.
 ### The actual engine target is defined in ./src/CMakeLists.txt.
 
@@ -31,6 +29,9 @@ target_link_libraries(
         GPUOpen::VulkanMemoryAllocator
         spdlog::spdlog
 )
+
+add_dependencies(kisha_engine_dependencies
+    kisha_shaders)
 
 ##### Platform compile definitions
 

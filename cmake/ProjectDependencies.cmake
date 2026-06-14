@@ -12,3 +12,5 @@ find_package(Vulkan REQUIRED)
 get_target_property(VULKAN_LIB_LOCATION Vulkan::Vulkan IMPORTED_LOCATION)
 message(STATUS "Found Vulkan Library: ${VULKAN_LIB_LOCATION}")
 
+# We are requiring slangc be already installed because the build take a long time
+find_program(SLANG_COMPILER_BIN slangc HINTS $ENV{VULKAN_SDK}/bin REQUIRED)
