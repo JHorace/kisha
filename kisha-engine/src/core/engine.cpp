@@ -32,10 +32,21 @@ namespace kisha::engine {
       DeviceSpec spec{};
       util::append_unique(&spec.required_extensions, VK_EXT_SHADER_OBJECT_EXTENSION_NAME);
       util::append_unique(&spec.required_extensions, VK_KHR_UNIFIED_IMAGE_LAYOUTS_EXTENSION_NAME);
+      util::append_unique(&spec.required_extensions, VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME);
+      util::append_unique(&spec.required_extensions, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
       spec.require_discrete_gpu = true;
       return spec;
     }
   }
+
+  EngineCore::EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance,
+                         vk::raii::DebugUtilsMessengerEXT &&debug_messenger, vk::raii::PhysicalDevice &&physical_device,
+                         vk::raii::Device &&device)
+      : context_(std::move(context)),
+        instance_(std::move(instance)),
+        debug_messenger_(std::move(debug_messenger)),
+        physical_device_(std::move(physical_device)),
+        device_(std::move(device)) {}
 
   std::expected<EngineCore, EngineInitError> EngineCore::create(const EngineCreateInfo &create_info) {
     const InstanceSpec instance_spec = util::reconcile(engine_instance_baseline(create_info), create_info.instance_spec);
@@ -64,10 +75,21 @@ namespace kisha::engine {
                 .setMessageType(vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
                                 vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance)
                 .setPfnUserCallback(vk::PFN_DebugUtilsMessengerCallbackEXT(&util::vulkan_debug_callback));
-            debug_messenger = vk::raii::DebugUtilsMessengerEXT(instance, debug_create_info);
+            std::expected<vk::raii::DebugUtilsMessengerEXT, vk::Result> messenger =
+                instance.createDebugUtilsMessengerEXT(debug_create_info);
+            if (!messenger) {
+              spdlog::error("Failed to create debug utils messenger: {}", vk::to_string(messenger.error()));
+              return std::unexpected(EngineInitError::InstanceCreationFailed);
+            }
+            debug_messenger = std::move(*messenger);
           }
 
-          const vk::raii::PhysicalDevices physical_devices(instance);
+          std::expected<vk::raii::PhysicalDevices, vk::Result> physical_devices_result = instance.enumeratePhysicalDevices();
+          if (!physical_devices_result) {
+            spdlog::error("Failed to enumerate physical devices: {}", vk::to_string(physical_devices_result.error()));
+            return std::unexpected(EngineInitError::NoSuitableDevice);
+          }
+          vk::raii::PhysicalDevices physical_devices = std::move(*physical_devices_result);
           const std::expected<util::DeviceSelection, NoSuitableDeviceError> device_selection =
               util::select_physical_device(physical_devices, device_spec);
           if (!device_selection) {
@@ -75,7 +97,12 @@ namespace kisha::engine {
             return std::unexpected(EngineInitError::NoSuitableDevice);
           }
 
-          return std::unexpected(EngineInitError::NotImplemented);
+          vk::raii::PhysicalDevice physical_device = std::move(physical_devices[device_selection->index]);
+          return util::create_logical_device(physical_device, device_selection->queues, device_selection->enabled_extensions)
+              .transform([&](vk::raii::Device device) {
+                return EngineCore(std::move(context), std::move(instance), std::move(debug_messenger),
+                                  std::move(physical_device), std::move(device));
+              });
         });
   }
 }

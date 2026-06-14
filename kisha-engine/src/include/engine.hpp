@@ -82,8 +82,8 @@ namespace kisha::engine {
     EngineCore &operator=(const EngineCore &) = delete;
   private:
 
-    //EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance, vk::raii::DebugUtilsMessengerEXT &&debug_messenger,
-    //            vk::raii::PhysicalDevice &&physical_device, vk::raii::Device &&device);
+    EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance, vk::raii::DebugUtilsMessengerEXT &&debug_messenger,
+               vk::raii::PhysicalDevice &&physical_device, vk::raii::Device &&device);
 
     vk::raii::Context context_;
     vk::raii::Instance instance_{nullptr};

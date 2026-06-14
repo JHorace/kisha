@@ -44,6 +44,10 @@ namespace kisha::engine::util {
   [[nodiscard]] std::expected<QueueSelection, EngineInitError> select_queue_families(const vk::raii::PhysicalDevice &physical_device);
   [[nodiscard]] std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(const vk::raii::PhysicalDevices &physical_devices,
                                                                                             const DeviceSpec &device_spec);
+  [[nodiscard]] std::vector<vk::DeviceQueueCreateInfo> build_queue_create_infos(const QueueSelection &queues);
+  [[nodiscard]] std::expected<vk::raii::Device, EngineInitError> create_logical_device(const vk::raii::PhysicalDevice &physical_device,
+                                                                                       const QueueSelection &queues,
+                                                                                       const std::vector<std::string> &enabled_extensions);
   VKAPI_ATTR VkBool32 VKAPI_CALL vulkan_debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT message_type,
                                                        const VkDebugUtilsMessengerCallbackDataEXT *callback_data, void *user_data);
 }

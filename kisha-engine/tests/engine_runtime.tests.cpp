@@ -25,8 +25,16 @@ TEST_CASE("Engine baseline raises an app api version below 1.3", "[engine][core]
   const std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> result =
     kisha::engine::EngineCore::create(create_info);
 
-  REQUIRE_FALSE(result.has_value());
-  REQUIRE(result.error() != kisha::engine::EngineInitError::ApiVersionTooLow);
+  // Initialization must never fail because of the API version: on a capable GPU it
+  // succeeds outright, and otherwise it fails for some other (environment) reason.
+  REQUIRE((result.has_value() || result.error() != kisha::engine::EngineInitError::ApiVersionTooLow));
+}
+
+TEST_CASE("Engine init creates a logical device with default requirements", "[engine][core][gpu]") {
+  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> result =
+    kisha::engine::EngineCore::create();
+
+  REQUIRE(result.has_value());
 }
 
 TEST_CASE("Engine init reports missing required instance layers", "[engine][core]") {

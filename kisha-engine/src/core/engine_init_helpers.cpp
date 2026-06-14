@@ -29,18 +29,25 @@ namespace kisha::engine::util {
       const auto feature_chain =
           physical_device.getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features, vk::PhysicalDeviceVulkan12Features,
             vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceShaderObjectFeaturesEXT,
-            vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR>();
+            vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR, vk::PhysicalDeviceDescriptorBufferFeaturesEXT,
+            vk::PhysicalDeviceSwapchainMaintenance1FeaturesKHR>();
       const vk::PhysicalDeviceVulkan11Features &vulkan_11_features = feature_chain.get<vk::PhysicalDeviceVulkan11Features>();
       const vk::PhysicalDeviceVulkan12Features &vulkan_12_features = feature_chain.get<vk::PhysicalDeviceVulkan12Features>();
       const vk::PhysicalDeviceVulkan13Features &vulkan_13_features = feature_chain.get<vk::PhysicalDeviceVulkan13Features>();
       const vk::PhysicalDeviceShaderObjectFeaturesEXT &shader_object_features = feature_chain.get<vk::PhysicalDeviceShaderObjectFeaturesEXT>();
       const vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR &unified_image_layouts_features =
           feature_chain.get<vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR>();
+      const vk::PhysicalDeviceDescriptorBufferFeaturesEXT &descriptor_buffer_features =
+          feature_chain.get<vk::PhysicalDeviceDescriptorBufferFeaturesEXT>();
+      const vk::PhysicalDeviceSwapchainMaintenance1FeaturesKHR &swapchain_maintenance_1_features =
+          feature_chain.get<vk::PhysicalDeviceSwapchainMaintenance1FeaturesKHR>();
 
       if (!vulkan_11_features.shaderDrawParameters)
         missing_features.push_back("shaderDrawParameters");
       if (!vulkan_12_features.timelineSemaphore)
         missing_features.push_back("timelineSemaphore");
+      if (!vulkan_12_features.bufferDeviceAddress)
+        missing_features.push_back("bufferDeviceAddress");
 
       if (!unified_image_layouts_features.unifiedImageLayouts)
         missing_features.push_back("unifiedImageLayouts");
@@ -53,6 +60,12 @@ namespace kisha::engine::util {
 
       if (!shader_object_features.shaderObject)
         missing_features.push_back("shaderObject");
+
+      if (!descriptor_buffer_features.descriptorBuffer)
+        missing_features.push_back("descriptorBuffer");
+
+      if (!swapchain_maintenance_1_features.swapchainMaintenance1)
+        missing_features.push_back("swapchainMaintenance1");
 
       return missing_features;
     }
@@ -101,19 +114,34 @@ namespace kisha::engine::util {
   }
 
   std::vector<std::string> enumerate_instance_extension_names(const vk::raii::Context &context) {
-    return context.enumerateInstanceExtensionProperties()
+    const auto properties = context.enumerateInstanceExtensionProperties();
+    if (!properties) {
+      spdlog::error("Failed to enumerate instance extension properties: {}", vk::to_string(properties.error()));
+      return {};
+    }
+    return *properties
         | std::views::transform([](const vk::ExtensionProperties &p) { return std::string(p.extensionName); })
         | std::ranges::to<std::vector>();
   }
 
   std::vector<std::string> enumerate_instance_layer_names(const vk::raii::Context &context) {
-    return context.enumerateInstanceLayerProperties()
+    const auto properties = context.enumerateInstanceLayerProperties();
+    if (!properties) {
+      spdlog::error("Failed to enumerate instance layer properties: {}", vk::to_string(properties.error()));
+      return {};
+    }
+    return *properties
         | std::views::transform([](const vk::LayerProperties &p) { return std::string(p.layerName); })
         | std::ranges::to<std::vector>();
   }
 
   std::vector<std::string> enumerate_device_extension_names(const vk::raii::PhysicalDevice &physical_device) {
-    return physical_device.enumerateDeviceExtensionProperties()
+    const auto properties = physical_device.enumerateDeviceExtensionProperties();
+    if (!properties) {
+      spdlog::error("Failed to enumerate device extension properties: {}", vk::to_string(properties.error()));
+      return {};
+    }
+    return *properties
         | std::views::transform([](const vk::ExtensionProperties &p) { return std::string(p.extensionName); })
         | std::ranges::to<std::vector>();
   }
@@ -154,7 +182,11 @@ namespace kisha::engine::util {
         .setEnabledExtensionCount(std::uint32_t(instance_extension_ptrs.size()))
         .setPpEnabledExtensionNames(instance_extension_ptrs.data());
 
-    return vk::raii::Instance(context, instance_create_info);
+    return context.createInstance(instance_create_info)
+        .transform_error([](const vk::Result result) {
+          spdlog::error("Failed to create Vulkan instance: {}", vk::to_string(result));
+          return EngineInitError::InstanceCreationFailed;
+        });
   }
 
 std::expected<QueueSelection, EngineInitError> select_queue_families(const vk::raii::PhysicalDevice &physical_device) {
@@ -363,6 +395,65 @@ std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(con
   spdlog::error("No suitable physical device found among {} candidate(s)", rejected.size());
   return std::unexpected(NoSuitableDeviceError{.candidates = std::move(rejected)});
 }
+
+  std::vector<vk::DeviceQueueCreateInfo> build_queue_create_infos(const QueueSelection &queues) {
+    std::vector<std::uint32_t> unique_families;
+    const auto add_family = [&](const std::uint32_t family) {
+      if (std::ranges::find(unique_families, family) == unique_families.end()) {
+        unique_families.push_back(family);
+      }
+    };
+    add_family(queues.indices.graphics);
+    if (queues.indices.async_compute.has_value()) {
+      add_family(*queues.indices.async_compute);
+    }
+    if (queues.indices.transfer.has_value()) {
+      add_family(*queues.indices.transfer);
+    }
+
+    static constexpr float queue_priority = 1.0F;
+    std::vector<vk::DeviceQueueCreateInfo> queue_create_infos;
+    queue_create_infos.reserve(unique_families.size());
+    for (const std::uint32_t family : unique_families) {
+      queue_create_infos.push_back(vk::DeviceQueueCreateInfo{}
+          .setQueueFamilyIndex(family)
+          .setQueueCount(1U)
+          .setPQueuePriorities(&queue_priority));
+    }
+    return queue_create_infos;
+  }
+
+  std::expected<vk::raii::Device, EngineInitError> create_logical_device(const vk::raii::PhysicalDevice &physical_device,
+                                                                         const QueueSelection &queues,
+                                                                         const std::vector<std::string> &enabled_extensions) {
+    const std::vector<vk::DeviceQueueCreateInfo> queue_create_infos = build_queue_create_infos(queues);
+
+    const std::vector<const char *> extension_ptrs = to_c_string_ptrs(enabled_extensions);
+
+    vk::StructureChain<vk::DeviceCreateInfo, vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features,
+                       vk::PhysicalDeviceVulkan12Features, vk::PhysicalDeviceVulkan13Features,
+                       vk::PhysicalDeviceShaderObjectFeaturesEXT, vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR,
+                       vk::PhysicalDeviceDescriptorBufferFeaturesEXT, vk::PhysicalDeviceSwapchainMaintenance1FeaturesKHR>
+        chain;
+
+    chain.get<vk::PhysicalDeviceVulkan11Features>().setShaderDrawParameters(true);
+    chain.get<vk::PhysicalDeviceVulkan12Features>().setTimelineSemaphore(true).setBufferDeviceAddress(true);
+    chain.get<vk::PhysicalDeviceVulkan13Features>().setDynamicRendering(true).setSynchronization2(true);
+    chain.get<vk::PhysicalDeviceShaderObjectFeaturesEXT>().setShaderObject(true);
+    chain.get<vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR>().setUnifiedImageLayouts(true);
+    chain.get<vk::PhysicalDeviceDescriptorBufferFeaturesEXT>().setDescriptorBuffer(true);
+    chain.get<vk::PhysicalDeviceSwapchainMaintenance1FeaturesKHR>().setSwapchainMaintenance1(true);
+
+    chain.get<vk::DeviceCreateInfo>()
+        .setQueueCreateInfos(queue_create_infos)
+        .setPEnabledExtensionNames(extension_ptrs);
+
+    return physical_device.createDevice(chain.get<vk::DeviceCreateInfo>())
+        .transform_error([](const vk::Result result) {
+          spdlog::error("Failed to create logical device: {}", vk::to_string(result));
+          return EngineInitError::DeviceCreationFailed;
+        });
+  }
 
   VKAPI_ATTR VkBool32 VKAPI_CALL vulkan_debug_callback(const VkDebugUtilsMessageSeverityFlagBitsEXT severity, const VkDebugUtilsMessageTypeFlagsEXT message_type,
                                                        const VkDebugUtilsMessengerCallbackDataEXT *callback_data, void * /*user_data*/
