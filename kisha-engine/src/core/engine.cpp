@@ -79,7 +79,7 @@ namespace kisha::engine {
   EngineCore::EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance,
                          vk::raii::DebugUtilsMessengerEXT &&debug_messenger, vk::raii::PhysicalDevices &&physical_devices,
                          std::vector<DeviceSelection> &&device_candidates, const size_t active_candidate_index,
-                         vk::raii::Device &&device, Queues &&queues)
+                         vk::raii::Device &&device, Queues &&queues, EngineProfile &&profile)
       : _context(std::move(context)),
         _instance(std::move(instance)),
         _debug_messenger(std::move(debug_messenger)),
@@ -87,7 +87,8 @@ namespace kisha::engine {
         _device_candidates(std::move(device_candidates)),
         _active_candidate_index(active_candidate_index),
         _device(std::move(device)),
-        _queues(std::move(queues)) {}
+        _queues(std::move(queues)),
+        _profile(std::move(profile)) {}
 
   std::expected<EngineCore, EngineInitError> EngineCore::create(const EngineCreateInfo &create_info) {
     return EngineInstance::create(create_info)
@@ -164,12 +165,22 @@ namespace kisha::engine {
     spdlog::info("Creating logical device on '{}' (graphics family {}, present family {})",
                  std::string(properties.deviceName), selection.queues.indices.graphics, selection.queues.indices.present);
 
+    EngineProfile profile{
+      .device_name = std::string(properties.deviceName),
+      .device_type = properties.deviceType,
+      .vendor_id = properties.vendorID,
+      .device_id = properties.deviceID,
+      .api_version = properties.apiVersion,
+      .enabled_extensions = selection.enabled_extensions,
+      .missing_optional_extensions = selection.missing_optional_extensions,
+    };
+
     return util::create_logical_device(physical_device, selection.queues, selection.enabled_extensions)
         .transform([&](vk::raii::Device device) {
           Queues queues = util::acquire_queues(device, selection.queues);
           return EngineCore(std::move(context_), std::move(instance_), std::move(debug_messenger_),
                             std::move(physical_devices_), std::move(device_candidates_), active_candidate_index,
-                            std::move(device), std::move(queues));
+                            std::move(device), std::move(queues), std::move(profile));
         });
   }
 }

@@ -90,6 +90,29 @@ TEST_CASE("EngineCore::create yields a present family mirroring graphics", "[eng
   REQUIRE(core->queue_family_indices().present == core->queue_family_indices().graphics);
 }
 
+TEST_CASE("EngineCore exposes a profile matching the active device", "[engine][core][gpu]") {
+  // The EngineProfile is populated at device creation from the active candidate's
+  // physical-device properties and the negotiated extension lists, and must agree
+  // with the live physical device exposed by the core.
+  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> core =
+    kisha::engine::EngineCore::create();
+
+  REQUIRE(core.has_value());
+
+  const kisha::engine::EngineProfile &profile = core->profile();
+  const vk::PhysicalDeviceProperties properties = core->physical_device().getProperties();
+
+  REQUIRE(profile.device_name == std::string(properties.deviceName));
+  REQUIRE(profile.device_type == properties.deviceType);
+  REQUIRE(profile.vendor_id == properties.vendorID);
+  REQUIRE(profile.device_id == properties.deviceID);
+  REQUIRE(profile.api_version == properties.apiVersion);
+  // The profile mirrors the active candidate's negotiated extension lists.
+  const kisha::engine::DeviceSelection &active = core->device_candidates().front();
+  REQUIRE(profile.enabled_extensions == active.enabled_extensions);
+  REQUIRE(profile.missing_optional_extensions == active.missing_optional_extensions);
+}
+
 TEST_CASE("EngineInstance init reports missing required instance layers", "[engine][core]") {
   kisha::engine::EngineCreateInfo create_info{};
   create_info.instance_spec.min_api_version = VK_API_VERSION_1_3;

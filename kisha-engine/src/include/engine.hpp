@@ -118,13 +118,14 @@ namespace kisha::engine {
       return _device_candidates[_active_candidate_index].queues.indices;
     }
     [[nodiscard]] const std::vector<DeviceSelection> &device_candidates() const { return _device_candidates; }
+    [[nodiscard]] const EngineProfile &profile() const { return _profile; }
 
   private:
     friend class EngineInstance;
 
     EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance, vk::raii::DebugUtilsMessengerEXT &&debug_messenger,
                vk::raii::PhysicalDevices &&physical_devices, std::vector<DeviceSelection> &&device_candidates,
-               std::size_t active_candidate_index, vk::raii::Device &&device, Queues &&queues);
+               std::size_t active_candidate_index, vk::raii::Device &&device, Queues &&queues, EngineProfile &&profile);
 
     vk::raii::Context _context;
     vk::raii::Instance _instance{nullptr};
