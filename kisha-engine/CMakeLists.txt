@@ -28,6 +28,7 @@ target_link_libraries(
         glm::glm
         GPUOpen::VulkanMemoryAllocator
         spdlog::spdlog
+        fmt::fmt
 )
 
 add_dependencies(kisha_engine_dependencies
