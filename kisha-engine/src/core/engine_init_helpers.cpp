@@ -455,6 +455,18 @@ std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(con
         });
   }
 
+  Queues acquire_queues(const vk::raii::Device &device, const QueueSelection &queues) {
+    Queues result{};
+    result.graphics = device.getQueue(queues.indices.graphics, 0U);
+    if (queues.indices.async_compute.has_value()) {
+      result.async_compute = device.getQueue(*queues.indices.async_compute, 0U);
+    }
+    if (queues.indices.transfer.has_value()) {
+      result.transfer = device.getQueue(*queues.indices.transfer, 0U);
+    }
+    return result;
+  }
+
   VKAPI_ATTR VkBool32 VKAPI_CALL vulkan_debug_callback(const VkDebugUtilsMessageSeverityFlagBitsEXT severity, const VkDebugUtilsMessageTypeFlagsEXT message_type,
                                                        const VkDebugUtilsMessengerCallbackDataEXT *callback_data, void * /*user_data*/
   ) {

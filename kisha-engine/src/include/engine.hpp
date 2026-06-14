@@ -22,6 +22,15 @@ namespace kisha::engine {
   };
 
   /**
+   * @brief device queues acquired after device creation.
+   */
+  struct Queues {
+    vk::raii::Queue graphics{nullptr};
+    std::optional<vk::raii::Queue> async_compute;
+    std::optional<vk::raii::Queue> transfer;
+  };
+
+  /**
    * @brief Requirements either the app or the engine imposes on instance creation.
    * The engine will reconcile its internal requirements with the app's.
    */
@@ -83,13 +92,15 @@ namespace kisha::engine {
   private:
 
     EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance, vk::raii::DebugUtilsMessengerEXT &&debug_messenger,
-               vk::raii::PhysicalDevice &&physical_device, vk::raii::Device &&device);
+               vk::raii::PhysicalDevice &&physical_device, vk::raii::Device &&device, Queues &&queues, EngineProfile &&profile);
 
-    vk::raii::Context context_;
-    vk::raii::Instance instance_{nullptr};
-    vk::raii::DebugUtilsMessengerEXT debug_messenger_{nullptr};
-    vk::raii::PhysicalDevice physical_device_{nullptr};
-    vk::raii::Device device_{nullptr};
+    vk::raii::Context _context;
+    vk::raii::Instance _instance{nullptr};
+    vk::raii::DebugUtilsMessengerEXT _debug_messenger{nullptr};
+    vk::raii::PhysicalDevice _physical_device{nullptr};
+    vk::raii::Device _device{nullptr};
+    Queues _queues{};
+    EngineProfile _profile;
   };
 }
 

@@ -1,4 +1,4 @@
-add_executable(kisha_engine_tests engine_runtime.tests.cpp)
+add_executable(kisha_engine_tests engine_runtime.tests.cpp engine_init_helpers.tests.cpp)
 target_compile_features(kisha_engine_tests PRIVATE cxx_std_23)
 target_link_libraries(
         kisha_engine_tests

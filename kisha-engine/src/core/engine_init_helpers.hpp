@@ -48,6 +48,7 @@ namespace kisha::engine::util {
   [[nodiscard]] std::expected<vk::raii::Device, EngineInitError> create_logical_device(const vk::raii::PhysicalDevice &physical_device,
                                                                                        const QueueSelection &queues,
                                                                                        const std::vector<std::string> &enabled_extensions);
+  [[nodiscard]] Queues acquire_queues(const vk::raii::Device &device, const QueueSelection &queues);
   VKAPI_ATTR VkBool32 VKAPI_CALL vulkan_debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT message_type,
                                                        const VkDebugUtilsMessengerCallbackDataEXT *callback_data, void *user_data);
 }
