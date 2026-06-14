@@ -42,11 +42,11 @@ namespace kisha::engine {
   EngineCore::EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance,
                          vk::raii::DebugUtilsMessengerEXT &&debug_messenger, vk::raii::PhysicalDevice &&physical_device,
                          vk::raii::Device &&device)
-      : context_(std::move(context)),
-        instance_(std::move(instance)),
-        debug_messenger_(std::move(debug_messenger)),
-        physical_device_(std::move(physical_device)),
-        device_(std::move(device)) {}
+      : _context(std::move(context)),
+        _instance(std::move(instance)),
+        _debug_messenger(std::move(debug_messenger)),
+        _physical_device(std::move(physical_device)),
+        _device(std::move(device)) {}
 
   std::expected<EngineCore, EngineInitError> EngineCore::create(const EngineCreateInfo &create_info) {
     const InstanceSpec instance_spec = util::reconcile(engine_instance_baseline(create_info), create_info.instance_spec);

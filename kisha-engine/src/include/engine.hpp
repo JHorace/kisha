@@ -85,11 +85,14 @@ namespace kisha::engine {
     EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance, vk::raii::DebugUtilsMessengerEXT &&debug_messenger,
                vk::raii::PhysicalDevice &&physical_device, vk::raii::Device &&device);
 
-    vk::raii::Context context_;
-    vk::raii::Instance instance_{nullptr};
-    vk::raii::DebugUtilsMessengerEXT debug_messenger_{nullptr};
-    vk::raii::PhysicalDevice physical_device_{nullptr};
-    vk::raii::Device device_{nullptr};
+    vk::raii::Context _context;
+    vk::raii::Instance _instance{nullptr};
+    vk::raii::DebugUtilsMessengerEXT _debug_messenger{nullptr};
+    vk::raii::PhysicalDevice _physical_device{nullptr};
+    vk::raii::Device _device{nullptr};
+    vk::raii::Queue _graphics_queue{nullptr};
+    vk::raii::Queue _async_compute_queue{nullptr};
+    vk::raii::Queue _transfer_queue{nullptr};
   };
 }
 
