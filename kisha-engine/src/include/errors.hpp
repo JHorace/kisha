@@ -33,6 +33,8 @@ namespace kisha::engine {
     MissingRequiredExtensions,
     NoSuitableQueueFamily,
     NoSuitableDevice,
+    InstanceCreationFailed,
+    DeviceCreationFailed,
   };
 
   struct MissingNamesError {

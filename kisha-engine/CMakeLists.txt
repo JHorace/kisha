@@ -63,6 +63,14 @@ endif()
 add_library(kisha::engine_dependencies ALIAS kisha_engine_dependencies)
 
 target_compile_features(kisha_engine_dependencies INTERFACE cxx_std_23)
+
+# These prevent vulkan from throwing exceptions.
+# Alongside our c++23 requirement this will cause vk::raii functions to return std::expected
+target_compile_definitions(kisha_engine_dependencies INTERFACE
+        VULKAN_HPP_NO_EXCEPTIONS
+        VULKAN_HPP_USE_STD_EXPECTED
+)
+
 target_link_libraries(
         kisha_engine_dependencies
         INTERFACE
