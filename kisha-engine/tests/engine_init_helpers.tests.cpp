@@ -91,7 +91,7 @@ TEST_CASE("validate_required_names reports the missing names", "[core]") {
 TEST_CASE("build_queue_create_infos collapses shared queue families", "[core]") {
   // All three roles resolve to the same family (the common single-queue GPU case):
   // exactly one DeviceQueueCreateInfo should be produced.
-  util::QueueSelection queues{};
+  kisha::engine::QueueSelection queues{};
   queues.indices.graphics = 0U;
   queues.indices.async_compute = 0U;
   queues.indices.transfer = 0U;
@@ -107,7 +107,7 @@ TEST_CASE("build_queue_create_infos collapses shared queue families", "[core]") 
 
 TEST_CASE("build_queue_create_infos produces one entry per distinct family", "[core]") {
   // Distinct graphics/compute/transfer families: three unique infos, order preserved.
-  util::QueueSelection queues{};
+  kisha::engine::QueueSelection queues{};
   queues.indices.graphics = 0U;
   queues.indices.async_compute = 1U;
   queues.indices.transfer = 2U;
@@ -122,7 +122,7 @@ TEST_CASE("build_queue_create_infos produces one entry per distinct family", "[c
 
 TEST_CASE("build_queue_create_infos de-duplicates partially shared families", "[core]") {
   // Compute shares the graphics family; transfer is dedicated.
-  util::QueueSelection queues{};
+  kisha::engine::QueueSelection queues{};
   queues.indices.graphics = 0U;
   queues.indices.async_compute = 0U;
   queues.indices.transfer = 1U;
@@ -136,7 +136,7 @@ TEST_CASE("build_queue_create_infos de-duplicates partially shared families", "[
 
 TEST_CASE("build_queue_create_infos handles absent optional families", "[core]") {
   // Only a graphics family is known; async_compute/transfer are nullopt.
-  util::QueueSelection queues{};
+  kisha::engine::QueueSelection queues{};
   queues.indices.graphics = 3U;
 
   const std::vector<vk::DeviceQueueCreateInfo> infos = util::build_queue_create_infos(queues);

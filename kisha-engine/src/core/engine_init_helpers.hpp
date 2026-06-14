@@ -9,25 +9,6 @@
 
 namespace kisha::engine::util {
 
-  /**
-   * @brief Information about selected queue families and queue topology
-   */
-  struct QueueSelection {
-    QueueFamilyIndices indices;
-    bool has_dedicated_async_compute = false;
-    bool has_dedicated_transfer = false;
-  };
-
-  /**
-   * @brief Selected physical-device including negotiated profile.
-   */
-  struct DeviceSelection {
-    std::size_t index = 0U;
-    QueueSelection queues{};
-    std::vector<std::string> enabled_extensions;
-    std::vector<std::string> missing_optional_extensions;
-  };
-
   [[nodiscard]] InstanceSpec reconcile(const InstanceSpec &engine, const InstanceSpec &app);
   [[nodiscard]] DeviceSpec reconcile(const DeviceSpec &engine, const DeviceSpec &app);
 
@@ -44,6 +25,8 @@ namespace kisha::engine::util {
   [[nodiscard]] std::expected<QueueSelection, EngineInitError> select_queue_families(const vk::raii::PhysicalDevice &physical_device);
   [[nodiscard]] std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(const vk::raii::PhysicalDevices &physical_devices,
                                                                                             const DeviceSpec &device_spec);
+  [[nodiscard]] std::expected<std::vector<DeviceSelection>, NoSuitableDeviceError> rank_physical_devices(
+      const vk::raii::PhysicalDevices &physical_devices, const DeviceSpec &device_spec);
   [[nodiscard]] std::vector<vk::DeviceQueueCreateInfo> build_queue_create_infos(const QueueSelection &queues);
   [[nodiscard]] std::expected<vk::raii::Device, EngineInitError> create_logical_device(const vk::raii::PhysicalDevice &physical_device,
                                                                                        const QueueSelection &queues,

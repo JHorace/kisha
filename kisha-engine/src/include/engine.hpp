@@ -31,6 +31,25 @@ namespace kisha::engine {
   };
 
   /**
+   * @brief Information about selected queue families and queue topology
+   */
+  struct QueueSelection {
+    QueueFamilyIndices indices;
+    bool has_dedicated_async_compute = false;
+    bool has_dedicated_transfer = false;
+  };
+
+  /**
+   * @brief Selected physical-device including negotiated profile.
+   */
+  struct DeviceSelection {
+    std::size_t index = 0U;
+    QueueSelection queues{};
+    std::vector<std::string> enabled_extensions;
+    std::vector<std::string> missing_optional_extensions;
+  };
+
+  /**
    * @brief Requirements either the app or the engine imposes on instance creation.
    * The engine will reconcile its internal requirements with the app's.
    */
@@ -101,6 +120,37 @@ namespace kisha::engine {
     vk::raii::Device _device{nullptr};
     Queues _queues{};
     EngineProfile _profile;
+  };
+
+  /**
+   * @brief EngineInstance is an EngineCore without a device. It enumerates and exposes all the details needed to
+   *        select and create a device. On
+   */
+  class EngineInstance {
+  public:
+    static std::expected<EngineInstance, EngineInitError> create(const EngineCreateInfo &create_info = {});
+
+    //RAII type, so can only be move assigned/constructed
+    EngineInstance(EngineInstance &&other) noexcept = default;
+    EngineInstance &operator=(EngineInstance &&other) noexcept = default;
+
+    EngineInstance(const EngineInstance &) = delete;
+    EngineInstance &operator=(const EngineInstance &) = delete;
+
+    [[nodiscard]] const vk::raii::Instance &instance() const { return instance_; }
+    [[nodiscard]] const vk::raii::PhysicalDevices &physical_devices() const { return physical_devices_; }
+    [[nodiscard]] const std::vector<DeviceSelection> &device_candidates() const { return device_candidates_; }
+
+  private:
+    EngineInstance(vk::raii::Context &&context, vk::raii::Instance &&instance,
+                   vk::raii::DebugUtilsMessengerEXT &&debug_messenger, vk::raii::PhysicalDevices &&physical_devices,
+                   std::vector<DeviceSelection> &&device_candidates);
+
+    vk::raii::Context context_;
+    vk::raii::Instance instance_{nullptr};
+    vk::raii::DebugUtilsMessengerEXT debug_messenger_{nullptr};
+    vk::raii::PhysicalDevices physical_devices_{nullptr};
+    std::vector<DeviceSelection> device_candidates_;
   };
 }
 

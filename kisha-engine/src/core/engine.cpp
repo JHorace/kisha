@@ -56,6 +56,24 @@ namespace kisha::engine {
       spec.require_discrete_gpu = true;
       return spec;
     }
+
+    std::expected<vk::raii::DebugUtilsMessengerEXT, EngineInitError> create_debug_messenger(const vk::raii::Instance &instance,
+                                                                                            const bool enable_validation) {
+      if (!enable_validation) {
+        return vk::raii::DebugUtilsMessengerEXT{nullptr};
+      }
+      const vk::DebugUtilsMessengerCreateInfoEXT debug_create_info =
+          vk::DebugUtilsMessengerCreateInfoEXT{}
+          .setMessageSeverity(vk::DebugUtilsMessageSeverityFlagBitsEXT::eError | vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning)
+          .setMessageType(vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
+                          vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance)
+          .setPfnUserCallback(vk::PFN_DebugUtilsMessengerCallbackEXT(&util::vulkan_debug_callback));
+      return instance.createDebugUtilsMessengerEXT(debug_create_info)
+          .transform_error([](const vk::Result result) {
+            spdlog::error("Failed to create debug utils messenger: {}", vk::to_string(result));
+            return EngineInitError::InstanceCreationFailed;
+          });
+    }
   }
 
   EngineCore::EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance,
@@ -88,22 +106,12 @@ namespace kisha::engine {
 
     return util::create_instance(context, application_info, instance_spec.required_layers, instance_spec.required_extensions)
         .and_then([&](vk::raii::Instance instance) -> std::expected<EngineCore, EngineInitError> {
-          vk::raii::DebugUtilsMessengerEXT debug_messenger{nullptr};
-          if (create_info.enable_validation) {
-            const vk::DebugUtilsMessengerCreateInfoEXT debug_create_info =
-                vk::DebugUtilsMessengerCreateInfoEXT{}
-                .setMessageSeverity(vk::DebugUtilsMessageSeverityFlagBitsEXT::eError | vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning)
-                .setMessageType(vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral | vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
-                                vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance)
-                .setPfnUserCallback(vk::PFN_DebugUtilsMessengerCallbackEXT(&util::vulkan_debug_callback));
-            std::expected<vk::raii::DebugUtilsMessengerEXT, vk::Result> messenger =
-                instance.createDebugUtilsMessengerEXT(debug_create_info);
-            if (!messenger) {
-              spdlog::error("Failed to create debug utils messenger: {}", vk::to_string(messenger.error()));
-              return std::unexpected(EngineInitError::InstanceCreationFailed);
-            }
-            debug_messenger = std::move(*messenger);
+          std::expected<vk::raii::DebugUtilsMessengerEXT, EngineInitError> messenger =
+              create_debug_messenger(instance, create_info.enable_validation);
+          if (!messenger) {
+            return std::unexpected(messenger.error());
           }
+          vk::raii::DebugUtilsMessengerEXT debug_messenger = std::move(*messenger);
 
           std::expected<vk::raii::PhysicalDevices, vk::Result> physical_devices_result = instance.enumeratePhysicalDevices();
           if (!physical_devices_result) {
@@ -111,7 +119,7 @@ namespace kisha::engine {
             return std::unexpected(EngineInitError::NoSuitableDevice);
           }
           vk::raii::PhysicalDevices physical_devices = std::move(*physical_devices_result);
-          const std::expected<util::DeviceSelection, NoSuitableDeviceError> device_selection =
+          const std::expected<DeviceSelection, NoSuitableDeviceError> device_selection =
               util::select_physical_device(physical_devices, device_spec);
           if (!device_selection) {
             log_error(device_selection.error());
@@ -136,6 +144,62 @@ namespace kisha::engine {
                 Queues queues = util::acquire_queues(device, device_selection->queues);
                 return EngineCore(std::move(context), std::move(instance), std::move(debug_messenger),
                                   std::move(physical_device), std::move(device), std::move(queues), std::move(profile));
+              });
+        });
+  }
+
+  EngineInstance::EngineInstance(vk::raii::Context &&context, vk::raii::Instance &&instance,
+                                 vk::raii::DebugUtilsMessengerEXT &&debug_messenger,
+                                 vk::raii::PhysicalDevices &&physical_devices,
+                                 std::vector<DeviceSelection> &&device_candidates)
+      : context_(std::move(context)),
+        instance_(std::move(instance)),
+        debug_messenger_(std::move(debug_messenger)),
+        physical_devices_(std::move(physical_devices)),
+        device_candidates_(std::move(device_candidates)) {}
+
+  std::expected<EngineInstance, EngineInitError> EngineInstance::create(const EngineCreateInfo &create_info) {
+    const InstanceSpec instance_spec = util::reconcile(engine_instance_baseline(create_info), create_info.instance_spec);
+    const DeviceSpec device_spec = util::reconcile(engine_device_baseline(), create_info.device_spec);
+
+    if (instance_spec.min_api_version < VK_API_VERSION_1_3) {
+      return std::unexpected(EngineInitError::ApiVersionTooLow);
+    }
+
+    vk::raii::Context context;
+
+    const vk::ApplicationInfo application_info = vk::ApplicationInfo{}
+        .setPApplicationName(create_info.application_name.c_str())
+        .setApplicationVersion(create_info.application_version)
+        .setPEngineName("kisha-engine")
+        .setEngineVersion(create_info.engine_version)
+        .setApiVersion(instance_spec.min_api_version);
+
+    return util::create_instance(context, application_info, instance_spec.required_layers, instance_spec.required_extensions)
+        .and_then([&](vk::raii::Instance instance) -> std::expected<EngineInstance, EngineInitError> {
+          return create_debug_messenger(instance, create_info.enable_validation)
+              .and_then([&](vk::raii::DebugUtilsMessengerEXT debug_messenger) -> std::expected<EngineInstance, EngineInitError> {
+                std::expected<vk::raii::PhysicalDevices, vk::Result> physical_devices_result = instance.enumeratePhysicalDevices();
+                if (!physical_devices_result) {
+                  spdlog::error("Failed to enumerate physical devices: {}", vk::to_string(physical_devices_result.error()));
+                  return std::unexpected(EngineInitError::NoSuitableDevice);
+                }
+                vk::raii::PhysicalDevices physical_devices = std::move(*physical_devices_result);
+
+                std::expected<std::vector<DeviceSelection>, NoSuitableDeviceError> candidates =
+                    util::rank_physical_devices(physical_devices, device_spec);
+                if (!candidates) {
+                  log_error(candidates.error());
+                  return std::unexpected(EngineInitError::NoSuitableDevice);
+                }
+
+                const vk::PhysicalDeviceProperties preferred_properties =
+                    physical_devices[candidates->front().index].getProperties();
+                spdlog::info("Selected {} candidate device(s); preferred: '{}'", candidates->size(),
+                             std::string(preferred_properties.deviceName));
+
+                return EngineInstance(std::move(context), std::move(instance), std::move(debug_messenger),
+                                      std::move(physical_devices), std::move(*candidates));
               });
         });
   }

@@ -255,7 +255,7 @@ std::expected<QueueSelection, EngineInitError> select_queue_families(const vk::r
   };
 }
   
-std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(const vk::raii::PhysicalDevices &physical_devices,
+std::expected<std::vector<DeviceSelection>, NoSuitableDeviceError> rank_physical_devices(const vk::raii::PhysicalDevices &physical_devices,
                                                                             const DeviceSpec &device_spec) {
   struct Candidate {
     std::size_t index = 0U;
@@ -351,31 +351,35 @@ std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(con
     }
   }
 
-  // Prefer the discrete GPU satisfying the most optional extensions; ties keep the first found.
-  const auto best_by_optional = [](const std::vector<Candidate> &candidates) -> const Candidate * {
-    const Candidate *best = nullptr;
-    for (const Candidate &candidate : candidates) {
-      if (best == nullptr || candidate.satisfied_optional > best->satisfied_optional) {
-        best = &candidate;
-      }
-    }
-    return best;
+  // Order each tier by the number of satisfied optional extensions, best first;
+  // ties keep enumeration order. Discrete GPUs always precede integrated ones.
+  const auto by_optional_desc = [](const Candidate &a, const Candidate &b) {
+    return a.satisfied_optional > b.satisfied_optional;
   };
+  std::ranges::stable_sort(discrete_candidates, by_optional_desc);
+  std::ranges::stable_sort(integrated_candidates, by_optional_desc);
 
-  const Candidate *selected = best_by_optional(discrete_candidates);
-
-  if (selected == nullptr && !device_spec.require_discrete_gpu) {
-    // Only fall back to an integrated GPU when a discrete one is not required and none is suitable.
-    selected = best_by_optional(integrated_candidates);
+  std::vector<Candidate> ordered = std::move(discrete_candidates);
+  if (!device_spec.require_discrete_gpu) {
+    // Integrated GPUs are only viable when a discrete GPU is not required.
+    for (Candidate &candidate : integrated_candidates) {
+      ordered.push_back(std::move(candidate));
+    }
+    integrated_candidates.clear();
   }
 
-  if (selected != nullptr) {
-    return DeviceSelection{
-      .index = selected->index,
-      .queues = selected->queues,
-      .enabled_extensions = selected->enabled_extensions,
-      .missing_optional_extensions = selected->missing_optional_extensions,
-    };
+  if (!ordered.empty()) {
+    std::vector<DeviceSelection> selections;
+    selections.reserve(ordered.size());
+    for (Candidate &candidate : ordered) {
+      selections.push_back(DeviceSelection{
+        .index = candidate.index,
+        .queues = candidate.queues,
+        .enabled_extensions = std::move(candidate.enabled_extensions),
+        .missing_optional_extensions = std::move(candidate.missing_optional_extensions),
+      });
+    }
+    return selections;
   }
 
   // No device was selected: any otherwise-suitable integrated GPU was rejected
@@ -394,6 +398,12 @@ std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(con
 
   spdlog::error("No suitable physical device found among {} candidate(s)", rejected.size());
   return std::unexpected(NoSuitableDeviceError{.candidates = std::move(rejected)});
+}
+
+std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(const vk::raii::PhysicalDevices &physical_devices,
+                                                                            const DeviceSpec &device_spec) {
+  return rank_physical_devices(physical_devices, device_spec)
+      .transform([](std::vector<DeviceSelection> selections) { return std::move(selections.front()); });
 }
 
   std::vector<vk::DeviceQueueCreateInfo> build_queue_create_infos(const QueueSelection &queues) {
