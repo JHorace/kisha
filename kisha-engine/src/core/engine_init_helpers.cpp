@@ -247,6 +247,7 @@ std::expected<QueueSelection, EngineInitError> select_queue_families(const vk::r
     .indices =
       QueueFamilyIndices{
         .graphics = *graphics_family,
+        .present = *graphics_family,
         .async_compute = async_compute_family,
         .transfer = transfer_family,
       },
@@ -414,6 +415,7 @@ std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(con
       }
     };
     add_family(queues.indices.graphics);
+    add_family(queues.indices.present);
     if (queues.indices.async_compute.has_value()) {
       add_family(*queues.indices.async_compute);
     }

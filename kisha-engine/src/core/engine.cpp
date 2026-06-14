@@ -77,75 +77,21 @@ namespace kisha::engine {
   }
 
   EngineCore::EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance,
-                         vk::raii::DebugUtilsMessengerEXT &&debug_messenger, vk::raii::PhysicalDevice &&physical_device,
-                         vk::raii::Device &&device, Queues &&queues, EngineProfile &&profile)
+                         vk::raii::DebugUtilsMessengerEXT &&debug_messenger, vk::raii::PhysicalDevices &&physical_devices,
+                         std::vector<DeviceSelection> &&device_candidates, const size_t active_candidate_index,
+                         vk::raii::Device &&device, Queues &&queues)
       : _context(std::move(context)),
         _instance(std::move(instance)),
         _debug_messenger(std::move(debug_messenger)),
-        _physical_device(std::move(physical_device)),
+        _physical_devices(std::move(physical_devices)),
+        _device_candidates(std::move(device_candidates)),
+        _active_candidate_index(active_candidate_index),
         _device(std::move(device)),
-        _queues(std::move(queues)),
-        _profile(std::move(profile)) {}
+        _queues(std::move(queues)) {}
 
   std::expected<EngineCore, EngineInitError> EngineCore::create(const EngineCreateInfo &create_info) {
-    const InstanceSpec instance_spec = util::reconcile(engine_instance_baseline(create_info), create_info.instance_spec);
-    const DeviceSpec device_spec = util::reconcile(engine_device_baseline(), create_info.device_spec);
-
-    if (instance_spec.min_api_version < VK_API_VERSION_1_3) {
-      return std::unexpected(EngineInitError::ApiVersionTooLow);
-    }
-
-    vk::raii::Context context;
-
-    const vk::ApplicationInfo application_info = vk::ApplicationInfo{}
-        .setPApplicationName(create_info.application_name.c_str())
-        .setApplicationVersion(create_info.application_version)
-        .setPEngineName("kisha-engine")
-        .setEngineVersion(create_info.engine_version)
-        .setApiVersion(instance_spec.min_api_version);
-
-    return util::create_instance(context, application_info, instance_spec.required_layers, instance_spec.required_extensions)
-        .and_then([&](vk::raii::Instance instance) -> std::expected<EngineCore, EngineInitError> {
-          std::expected<vk::raii::DebugUtilsMessengerEXT, EngineInitError> messenger =
-              create_debug_messenger(instance, create_info.enable_validation);
-          if (!messenger) {
-            return std::unexpected(messenger.error());
-          }
-          vk::raii::DebugUtilsMessengerEXT debug_messenger = std::move(*messenger);
-
-          std::expected<vk::raii::PhysicalDevices, vk::Result> physical_devices_result = instance.enumeratePhysicalDevices();
-          if (!physical_devices_result) {
-            spdlog::error("Failed to enumerate physical devices: {}", vk::to_string(physical_devices_result.error()));
-            return std::unexpected(EngineInitError::NoSuitableDevice);
-          }
-          vk::raii::PhysicalDevices physical_devices = std::move(*physical_devices_result);
-          const std::expected<DeviceSelection, NoSuitableDeviceError> device_selection =
-              util::select_physical_device(physical_devices, device_spec);
-          if (!device_selection) {
-            log_error(device_selection.error());
-            return std::unexpected(EngineInitError::NoSuitableDevice);
-          }
-
-          vk::raii::PhysicalDevice physical_device = std::move(physical_devices[device_selection->index]);
-
-          const vk::PhysicalDeviceProperties device_properties = physical_device.getProperties();
-          EngineProfile profile{
-            .device_name = std::string(device_properties.deviceName),
-            .device_type = device_properties.deviceType,
-            .vendor_id = device_properties.vendorID,
-            .device_id = device_properties.deviceID,
-            .api_version = device_properties.apiVersion,
-            .enabled_extensions = device_selection->enabled_extensions,
-            .missing_optional_extensions = device_selection->missing_optional_extensions,
-          };
-
-          return util::create_logical_device(physical_device, device_selection->queues, device_selection->enabled_extensions)
-              .transform([&](vk::raii::Device device) {
-                Queues queues = util::acquire_queues(device, device_selection->queues);
-                return EngineCore(std::move(context), std::move(instance), std::move(debug_messenger),
-                                  std::move(physical_device), std::move(device), std::move(queues), std::move(profile));
-              });
-        });
+    return EngineInstance::create(create_info)
+        .and_then([](EngineInstance engine_instance) { return std::move(engine_instance).create_engine_core(); });
   }
 
   EngineInstance::EngineInstance(vk::raii::Context &&context, vk::raii::Instance &&instance,
@@ -201,6 +147,29 @@ namespace kisha::engine {
                 return EngineInstance(std::move(context), std::move(instance), std::move(debug_messenger),
                                       std::move(physical_devices), std::move(*candidates));
               });
+        });
+  }
+
+  std::expected<EngineCore, EngineInitError> EngineInstance::create_engine_core() && {
+    if (device_candidates_.empty()) {
+      spdlog::error("Cannot create a logical device: no suitable physical-device candidates");
+      return std::unexpected(EngineInitError::NoSuitableDevice);
+    }
+
+    constexpr std::size_t active_candidate_index = 0U;
+    const DeviceSelection &selection = device_candidates_[active_candidate_index];
+    const vk::raii::PhysicalDevice &physical_device = physical_devices_[selection.index];
+
+    const vk::PhysicalDeviceProperties properties = physical_device.getProperties();
+    spdlog::info("Creating logical device on '{}' (graphics family {}, present family {})",
+                 std::string(properties.deviceName), selection.queues.indices.graphics, selection.queues.indices.present);
+
+    return util::create_logical_device(physical_device, selection.queues, selection.enabled_extensions)
+        .transform([&](vk::raii::Device device) {
+          Queues queues = util::acquire_queues(device, selection.queues);
+          return EngineCore(std::move(context_), std::move(instance_), std::move(debug_messenger_),
+                            std::move(physical_devices_), std::move(device_candidates_), active_candidate_index,
+                            std::move(device), std::move(queues));
         });
   }
 }

@@ -17,6 +17,7 @@ namespace kisha::engine {
    */
   struct QueueFamilyIndices {
     std::uint32_t graphics = 0;
+    std::uint32_t present = 0;
     std::optional<std::uint32_t> async_compute;
     std::optional<std::uint32_t> transfer;
   };
@@ -108,15 +109,29 @@ namespace kisha::engine {
 
     EngineCore(const EngineCore &) = delete;
     EngineCore &operator=(const EngineCore &) = delete;
+
+    [[nodiscard]] const vk::raii::Device &device() const { return _device; }
+    [[nodiscard]] const vk::raii::PhysicalDevice &physical_device() const {
+      return _physical_devices[_device_candidates[_active_candidate_index].index];
+    }
+    [[nodiscard]] const QueueFamilyIndices &queue_family_indices() const {
+      return _device_candidates[_active_candidate_index].queues.indices;
+    }
+    [[nodiscard]] const std::vector<DeviceSelection> &device_candidates() const { return _device_candidates; }
+
   private:
+    friend class EngineInstance;
 
     EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance, vk::raii::DebugUtilsMessengerEXT &&debug_messenger,
-               vk::raii::PhysicalDevice &&physical_device, vk::raii::Device &&device, Queues &&queues, EngineProfile &&profile);
+               vk::raii::PhysicalDevices &&physical_devices, std::vector<DeviceSelection> &&device_candidates,
+               std::size_t active_candidate_index, vk::raii::Device &&device, Queues &&queues);
 
     vk::raii::Context _context;
     vk::raii::Instance _instance{nullptr};
     vk::raii::DebugUtilsMessengerEXT _debug_messenger{nullptr};
-    vk::raii::PhysicalDevice _physical_device{nullptr};
+    vk::raii::PhysicalDevices _physical_devices{nullptr};
+    std::vector<DeviceSelection> _device_candidates;
+    std::size_t _active_candidate_index = 0U;
     vk::raii::Device _device{nullptr};
     Queues _queues{};
     EngineProfile _profile;
@@ -141,6 +156,7 @@ namespace kisha::engine {
     [[nodiscard]] const vk::raii::PhysicalDevices &physical_devices() const { return physical_devices_; }
     [[nodiscard]] const std::vector<DeviceSelection> &device_candidates() const { return device_candidates_; }
 
+    [[nodiscard]] std::expected<EngineCore, EngineInitError> create_engine_core() &&;
   private:
     EngineInstance(vk::raii::Context &&context, vk::raii::Instance &&instance,
                    vk::raii::DebugUtilsMessengerEXT &&debug_messenger, vk::raii::PhysicalDevices &&physical_devices,

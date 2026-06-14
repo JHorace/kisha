@@ -141,7 +141,7 @@ TEST_CASE("build_queue_create_infos handles absent optional families", "[core]")
 
   const std::vector<vk::DeviceQueueCreateInfo> infos = util::build_queue_create_infos(queues);
 
-  REQUIRE(infos.size() == 1U);
+  REQUIRE(infos.size() == 2U);
   REQUIRE(infos[0].queueFamilyIndex == 3U);
 }
 
