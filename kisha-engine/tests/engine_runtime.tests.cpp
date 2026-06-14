@@ -63,6 +63,33 @@ TEST_CASE("EngineInstance only ranks discrete GPUs under the default spec", "[en
   }
 }
 
+TEST_CASE("EngineCore is produced from EngineInstance with an active candidate", "[engine][core][gpu]") {
+  // Phase 2: an EngineInstance is consumed to create a single logical device for
+  // the top-ranked candidate. The resulting core must expose a valid device and a
+  // present family that mirrors the graphics family (universal-present assumption).
+  std::expected<kisha::engine::EngineInstance, kisha::engine::EngineInitError> instance =
+    kisha::engine::EngineInstance::create();
+  REQUIRE(instance.has_value());
+
+  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> core =
+    std::move(*instance).create_engine_core();
+
+  REQUIRE(core.has_value());
+  REQUIRE(static_cast<VkDevice>(*core->device()) != VK_NULL_HANDLE);
+  REQUIRE_FALSE(core->device_candidates().empty());
+  REQUIRE(core->queue_family_indices().present == core->queue_family_indices().graphics);
+}
+
+TEST_CASE("EngineCore::create yields a present family mirroring graphics", "[engine][core][gpu]") {
+  // The eager EngineCore::create path now delegates to the two-phase init, so it
+  // must still produce a working device whose present family mirrors graphics.
+  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> core =
+    kisha::engine::EngineCore::create();
+
+  REQUIRE(core.has_value());
+  REQUIRE(core->queue_family_indices().present == core->queue_family_indices().graphics);
+}
+
 TEST_CASE("EngineInstance init reports missing required instance layers", "[engine][core]") {
   kisha::engine::EngineCreateInfo create_info{};
   create_info.instance_spec.min_api_version = VK_API_VERSION_1_3;
