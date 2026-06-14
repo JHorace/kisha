@@ -15,7 +15,7 @@ struct VertexStageInput
 
 struct VertexStageOutput
 {
-    float3 position;
+    float3 position : SV_Position;
     float3 normal;
     float2 uv;
 };
