@@ -9,4 +9,7 @@ target_include_directories(
         "${CMAKE_CURRENT_LIST_DIR}/include"
 )
 
+# Uncomment function below to treat Warnings as errors
+#setup_common_compile_options(kisha_engine)
+
 add_subdirectory(core)
