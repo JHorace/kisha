@@ -18,6 +18,25 @@ namespace kisha::engine {
     InstanceSpec engine_instance_baseline(const EngineCreateInfo &create_info) {
       InstanceSpec spec{};
       spec.min_api_version = VK_API_VERSION_1_3;
+
+      util::append_unique(&spec.required_extensions, VK_KHR_SURFACE_EXTENSION_NAME);
+      util::append_unique(&spec.required_extensions, VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+      util::append_unique(&spec.required_extensions, VK_KHR_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
+
+      // Per-platform surface extensions, needed to create surfaces from native handles.
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+      util::append_unique(&spec.required_extensions, VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME);
+#endif
+#ifdef VK_USE_PLATFORM_XCB_KHR
+      util::append_unique(&spec.required_extensions, VK_KHR_XCB_SURFACE_EXTENSION_NAME);
+#endif
+#ifdef VK_USE_PLATFORM_XLIB_KHR
+      util::append_unique(&spec.required_extensions, VK_KHR_XLIB_SURFACE_EXTENSION_NAME);
+#endif
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+      util::append_unique(&spec.required_extensions, VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+#endif
+
       if (create_info.enable_validation) {
         util::append_unique(&spec.required_layers, "VK_LAYER_KHRONOS_validation");
         util::append_unique(&spec.required_extensions, VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
