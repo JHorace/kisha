@@ -41,12 +41,14 @@ namespace kisha::engine {
 
   EngineCore::EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance,
                          vk::raii::DebugUtilsMessengerEXT &&debug_messenger, vk::raii::PhysicalDevice &&physical_device,
-                         vk::raii::Device &&device)
+                         vk::raii::Device &&device, Queues &&queues, EngineProfile &&profile)
       : _context(std::move(context)),
         _instance(std::move(instance)),
         _debug_messenger(std::move(debug_messenger)),
         _physical_device(std::move(physical_device)),
-        _device(std::move(device)) {}
+        _device(std::move(device)),
+        _queues(std::move(queues)),
+        _profile(std::move(profile)) {}
 
   std::expected<EngineCore, EngineInitError> EngineCore::create(const EngineCreateInfo &create_info) {
     const InstanceSpec instance_spec = util::reconcile(engine_instance_baseline(create_info), create_info.instance_spec);
@@ -98,10 +100,23 @@ namespace kisha::engine {
           }
 
           vk::raii::PhysicalDevice physical_device = std::move(physical_devices[device_selection->index]);
+
+          const vk::PhysicalDeviceProperties device_properties = physical_device.getProperties();
+          EngineProfile profile{
+            .device_name = std::string(device_properties.deviceName),
+            .device_type = device_properties.deviceType,
+            .vendor_id = device_properties.vendorID,
+            .device_id = device_properties.deviceID,
+            .api_version = device_properties.apiVersion,
+            .enabled_extensions = device_selection->enabled_extensions,
+            .missing_optional_extensions = device_selection->missing_optional_extensions,
+          };
+
           return util::create_logical_device(physical_device, device_selection->queues, device_selection->enabled_extensions)
               .transform([&](vk::raii::Device device) {
+                Queues queues = util::acquire_queues(device, device_selection->queues);
                 return EngineCore(std::move(context), std::move(instance), std::move(debug_messenger),
-                                  std::move(physical_device), std::move(device));
+                                  std::move(physical_device), std::move(device), std::move(queues), std::move(profile));
               });
         });
   }
