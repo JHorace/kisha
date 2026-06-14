@@ -37,6 +37,44 @@ TEST_CASE("Engine init creates a logical device with default requirements", "[en
   REQUIRE(result.has_value());
 }
 
+TEST_CASE("EngineInstance init enumerates at least one ranked device candidate", "[engine][core][gpu]") {
+  // Phase 1 builds the instance/debug messenger and ranks the physical devices
+  // without creating a logical device. On a capable GPU this yields candidates.
+  const std::expected<kisha::engine::EngineInstance, kisha::engine::EngineInitError> result =
+    kisha::engine::EngineInstance::create();
+
+  REQUIRE(result.has_value());
+  REQUIRE_FALSE(result->device_candidates().empty());
+}
+
+TEST_CASE("EngineInstance only ranks discrete GPUs under the default spec", "[engine][core][gpu]") {
+  // The engine device baseline requires a discrete GPU, so every ranked
+  // candidate must be a discrete GPU and indices must stay in range.
+  const std::expected<kisha::engine::EngineInstance, kisha::engine::EngineInitError> result =
+    kisha::engine::EngineInstance::create();
+
+  REQUIRE(result.has_value());
+
+  const vk::raii::PhysicalDevices &devices = result->physical_devices();
+  for (const kisha::engine::DeviceSelection &candidate : result->device_candidates()) {
+    REQUIRE(candidate.index < devices.size());
+    const vk::PhysicalDeviceProperties properties = devices[candidate.index].getProperties();
+    REQUIRE(properties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu);
+  }
+}
+
+TEST_CASE("EngineInstance init reports missing required instance layers", "[engine][core]") {
+  kisha::engine::EngineCreateInfo create_info{};
+  create_info.instance_spec.min_api_version = VK_API_VERSION_1_3;
+  create_info.instance_spec.required_layers = {"VK_LAYER_KISHA_definitely_does_not_exist"};
+
+  const std::expected<kisha::engine::EngineInstance, kisha::engine::EngineInitError> result =
+    kisha::engine::EngineInstance::create(create_info);
+
+  REQUIRE_FALSE(result.has_value());
+  REQUIRE(result.error() == kisha::engine::EngineInitError::MissingRequiredLayers);
+}
+
 TEST_CASE("Engine init reports missing required instance layers", "[engine][core]") {
   kisha::engine::EngineCreateInfo create_info{};
   create_info.instance_spec.min_api_version = VK_API_VERSION_1_3;
