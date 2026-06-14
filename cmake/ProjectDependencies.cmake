@@ -5,7 +5,6 @@ include(CPM)
 CPMAddPackage("gh:gabime/spdlog#v1.17.0")
 CPMAddPackage("gh:g-truc/glm#1.0.3")
 CPMAddPackage("gh:catchorg/Catch2#v3.15.0")
-CPMAddPackage("gh:gabime/spdlog#v1.17.0")
 CPMAddPackage("gh:GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator#v3.2.1")
 
 find_package(Vulkan REQUIRED)
