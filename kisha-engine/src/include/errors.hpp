@@ -37,6 +37,7 @@ namespace kisha::engine {
     DeviceCreationFailed,
     NoPresentCapableQueue,
     SurfaceCreationFailed,
+    SurfaceCapabilityQueryFailed,
     SwapchainCreationFailed,
     NoSurfaceCapableDevice,
   };

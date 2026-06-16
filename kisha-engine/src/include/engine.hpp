@@ -11,6 +11,7 @@
 #include <variant>
 
 #include "errors.hpp"
+#include "presenter.hpp"
 
 namespace kisha::engine {
   /**
@@ -95,73 +96,6 @@ namespace kisha::engine {
     bool enable_validation = false;
     InstanceSpec instance_spec;
     DeviceSpec device_spec;
-  };
-
-#ifdef VK_USE_PLATFORM_WAYLAND_KHR
-  struct WaylandWindowHandle {
-    wl_display *display = nullptr;
-    wl_surface *surface = nullptr;
-  };
-#endif
-#ifdef VK_USE_PLATFORM_XCB_KHR
-  struct XcbWindowHandle {
-    xcb_connection_t *connection = nullptr;
-    xcb_window_t window{};
-  };
-#endif
-#ifdef VK_USE_PLATFORM_XLIB_KHR
-  struct XlibWindowHandle {
-    Display *display = nullptr;
-    Window window{};
-  };
-#endif
-#ifdef VK_USE_PLATFORM_WIN32_KHR
-  struct Win32WindowHandle {
-    HINSTANCE hinstance = nullptr;
-    HWND hwnd = nullptr;
-  };
-#endif
-
-  /**
-   * @brief A native window handle the engine can create a surface from.
-   * std::monostate represents a headless window
-   */
-  using NativeWindowHandle = std::variant<
-      std::monostate
-#ifdef VK_USE_PLATFORM_WAYLAND_KHR
-      , WaylandWindowHandle
-#endif
-#ifdef VK_USE_PLATFORM_XCB_KHR
-      , XcbWindowHandle
-#endif
-#ifdef VK_USE_PLATFORM_XLIB_KHR
-      , XlibWindowHandle
-#endif
-#ifdef VK_USE_PLATFORM_WIN32_KHR
-      , Win32WindowHandle
-#endif
-      >;
-
-  /**
-   * @brief Owns the engine-created presentation surface, and eventually the swapchain.
-   */
-  class Presenter {
-  public:
-    // RAII type, so can only be move assigned/constructed.
-    Presenter(Presenter &&other) noexcept = default;
-    Presenter &operator=(Presenter &&other) noexcept = default;
-
-    Presenter(const Presenter &) = delete;
-    Presenter &operator=(const Presenter &) = delete;
-
-    [[nodiscard]] const vk::raii::SurfaceKHR &surface() const { return _surface; }
-
-  private:
-    friend class EngineCore;
-
-    explicit Presenter(vk::raii::SurfaceKHR &&surface) : _surface(std::move(surface)) {}
-
-    vk::raii::SurfaceKHR _surface{nullptr};
   };
 
   /**

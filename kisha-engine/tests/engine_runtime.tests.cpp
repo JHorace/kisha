@@ -128,6 +128,23 @@ TEST_CASE("EngineCore::create_presenter fails for an empty (headless) window han
   REQUIRE(presenter.error() == kisha::engine::EngineInitError::SurfaceCreationFailed);
 }
 
+TEST_CASE("SurfaceCapabilities exposes sane defaults for the Phase 4 capability layer", "[engine][core]") {
+  // Phase 4 adds the surface capability layer (VK_KHR_surface_maintenance1). The
+  // live query (Presenter::capabilities) requires a real surface and is therefore
+  // [gpu]-tagged and depends on the out-of-scope windowing framework; here we only
+  // pin down the public data types and their defaults so the API surface is stable.
+  const kisha::engine::PresentModeCapabilities mode_caps{};
+  REQUIRE(mode_caps.present_mode == vk::PresentModeKHR::eFifo);
+  REQUIRE(mode_caps.min_image_count == 0U);
+  REQUIRE(mode_caps.max_image_count == 0U);
+  REQUIRE(mode_caps.compatible_present_modes.empty());
+
+  const kisha::engine::SurfaceCapabilities caps{};
+  REQUIRE(caps.formats.empty());
+  REQUIRE(caps.present_modes.empty());
+  REQUIRE(caps.per_present_mode.empty());
+}
+
 TEST_CASE("EngineInstance init reports missing required instance layers", "[engine][core]") {
   kisha::engine::EngineCreateInfo create_info{};
   create_info.instance_spec.min_api_version = VK_API_VERSION_1_3;

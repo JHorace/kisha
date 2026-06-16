@@ -34,6 +34,8 @@ namespace kisha::engine::util {
   [[nodiscard]] Queues acquire_queues(const vk::raii::Device &device, const QueueSelection &queues);
   [[nodiscard]] std::expected<vk::raii::SurfaceKHR, EngineInitError> create_surface(const vk::raii::Instance &instance,
                                                                                    const NativeWindowHandle &window_handle);
+  [[nodiscard]] std::expected<SurfaceCapabilities, EngineInitError> query_surface_capabilities(const vk::raii::PhysicalDevice &physical_device,
+                                                                                               const vk::raii::SurfaceKHR &surface);
   VKAPI_ATTR VkBool32 VKAPI_CALL vulkan_debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity, VkDebugUtilsMessageTypeFlagsEXT message_type,
                                                        const VkDebugUtilsMessengerCallbackDataEXT *callback_data, void *user_data);
 }

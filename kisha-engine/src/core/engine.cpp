@@ -253,6 +253,6 @@ namespace kisha::engine {
     }
 
     spdlog::info("Created presentation surface (presenting device '{}')", _profile.device_name);
-    return Presenter(std::move(surface));
+    return Presenter(std::move(surface), physical_device());
   }
 }

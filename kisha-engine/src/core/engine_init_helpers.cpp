@@ -33,41 +33,41 @@ namespace kisha::engine::util {
             vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceShaderObjectFeaturesEXT,
             vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR, vk::PhysicalDeviceDescriptorBufferFeaturesEXT,
             vk::PhysicalDeviceSwapchainMaintenance1FeaturesKHR>();
-      const vk::PhysicalDeviceVulkan11Features &vulkan_11_features = feature_chain.get<vk::PhysicalDeviceVulkan11Features>();
-      const vk::PhysicalDeviceVulkan12Features &vulkan_12_features = feature_chain.get<vk::PhysicalDeviceVulkan12Features>();
-      const vk::PhysicalDeviceVulkan13Features &vulkan_13_features = feature_chain.get<vk::PhysicalDeviceVulkan13Features>();
-      const vk::PhysicalDeviceShaderObjectFeaturesEXT &shader_object_features = feature_chain.get<vk::PhysicalDeviceShaderObjectFeaturesEXT>();
-      const vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR &unified_image_layouts_features =
+      const auto &vulkan_11_features = feature_chain.get<vk::PhysicalDeviceVulkan11Features>();
+      const auto &vulkan_12_features = feature_chain.get<vk::PhysicalDeviceVulkan12Features>();
+      const auto &vulkan_13_features = feature_chain.get<vk::PhysicalDeviceVulkan13Features>();
+      const auto &shader_object_features = feature_chain.get<vk::PhysicalDeviceShaderObjectFeaturesEXT>();
+      const auto &unified_image_layouts_features =
           feature_chain.get<vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR>();
-      const vk::PhysicalDeviceDescriptorBufferFeaturesEXT &descriptor_buffer_features =
+      const auto &descriptor_buffer_features =
           feature_chain.get<vk::PhysicalDeviceDescriptorBufferFeaturesEXT>();
-      const vk::PhysicalDeviceSwapchainMaintenance1FeaturesKHR &swapchain_maintenance_1_features =
+      const auto &swapchain_maintenance_1_features =
           feature_chain.get<vk::PhysicalDeviceSwapchainMaintenance1FeaturesKHR>();
 
       if (!vulkan_11_features.shaderDrawParameters)
-        missing_features.push_back("shaderDrawParameters");
+        missing_features.emplace_back("shaderDrawParameters");
       if (!vulkan_12_features.timelineSemaphore)
-        missing_features.push_back("timelineSemaphore");
+        missing_features.emplace_back("timelineSemaphore");
       if (!vulkan_12_features.bufferDeviceAddress)
-        missing_features.push_back("bufferDeviceAddress");
+        missing_features.emplace_back("bufferDeviceAddress");
 
       if (!unified_image_layouts_features.unifiedImageLayouts)
-        missing_features.push_back("unifiedImageLayouts");
+        missing_features.emplace_back("unifiedImageLayouts");
 
       if (!vulkan_13_features.dynamicRendering)
-        missing_features.push_back("dynamicRendering");
+        missing_features.emplace_back("dynamicRendering");
 
       if (!vulkan_13_features.synchronization2)
-        missing_features.push_back("synchronization2");
+        missing_features.emplace_back("synchronization2");
 
       if (!shader_object_features.shaderObject)
-        missing_features.push_back("shaderObject");
+        missing_features.emplace_back("shaderObject");
 
       if (!descriptor_buffer_features.descriptorBuffer)
-        missing_features.push_back("descriptorBuffer");
+        missing_features.emplace_back("descriptorBuffer");
 
       if (!swapchain_maintenance_1_features.swapchainMaintenance1)
-        missing_features.push_back("swapchainMaintenance1");
+        missing_features.emplace_back("swapchainMaintenance1");
 
       return missing_features;
     }
@@ -531,6 +531,86 @@ std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(con
           }
         },
         window_handle);
+  }
+
+  std::expected<SurfaceCapabilities, EngineInitError> query_surface_capabilities(const vk::raii::PhysicalDevice &physical_device,
+                                                                                 const vk::raii::SurfaceKHR &surface) {
+    const auto map_error = [](const vk::Result result, const std::string_view what) {
+      spdlog::error("Failed to query surface {}: {}", what, vk::to_string(result));
+      return EngineInitError::SurfaceCapabilityQueryFailed;
+    };
+
+    const vk::PhysicalDeviceSurfaceInfo2KHR surface_info = vk::PhysicalDeviceSurfaceInfo2KHR{}.setSurface(*surface);
+
+    SurfaceCapabilities result{};
+
+    {
+      const std::expected<vk::SurfaceCapabilities2KHR, vk::Result> caps2 = physical_device.getSurfaceCapabilities2KHR(surface_info);
+      if (!caps2) {
+        return std::unexpected(map_error(caps2.error(), "capabilities"));
+      }
+      result.capabilities = caps2->surfaceCapabilities;
+    }
+
+    {
+      const std::expected<std::vector<vk::SurfaceFormat2KHR>, vk::Result> formats2 = physical_device.getSurfaceFormats2KHR(surface_info);
+      if (!formats2) {
+        return std::unexpected(map_error(formats2.error(), "formats"));
+      }
+      result.formats.reserve(formats2->size());
+      for (const vk::SurfaceFormat2KHR &format : *formats2) {
+        result.formats.push_back(format.surfaceFormat);
+      }
+    }
+
+    {
+      std::expected<std::vector<vk::PresentModeKHR>, vk::Result> present_modes = physical_device.getSurfacePresentModesKHR(*surface);
+      if (!present_modes) {
+        return std::unexpected(map_error(present_modes.error(), "present modes"));
+      }
+      result.present_modes = std::move(*present_modes);
+    }
+
+    result.per_present_mode.reserve(result.present_modes.size());
+    for (const vk::PresentModeKHR present_mode : result.present_modes) {
+      const vk::SurfacePresentModeKHR present_mode_info = vk::SurfacePresentModeKHR{}.setPresentMode(present_mode);
+      const vk::PhysicalDeviceSurfaceInfo2KHR mode_surface_info =
+          vk::PhysicalDeviceSurfaceInfo2KHR{}.setSurface(*surface).setPNext(&present_mode_info);
+
+      vk::SurfaceCapabilities2KHR caps2{};
+      vk::SurfacePresentScalingCapabilitiesKHR scaling{};
+      vk::SurfacePresentModeCompatibilityKHR compatibility{};
+      caps2.pNext = &compatibility;
+      compatibility.pNext = &scaling;
+
+      const vk::Result count_result = physical_device.getSurfaceCapabilities2KHR(&mode_surface_info, &caps2);
+      if (count_result != vk::Result::eSuccess) {
+        return std::unexpected(map_error(count_result, "present-mode capabilities"));
+      }
+
+      std::vector<vk::PresentModeKHR> compatible_modes(compatibility.presentModeCount);
+      compatibility.setPPresentModes(compatible_modes.data());
+
+      const vk::Result data_result = physical_device.getSurfaceCapabilities2KHR(&mode_surface_info, &caps2);
+      if (data_result != vk::Result::eSuccess) {
+        return std::unexpected(map_error(data_result, "present-mode capabilities"));
+      }
+      compatible_modes.resize(compatibility.presentModeCount);
+
+      result.per_present_mode.push_back(PresentModeCapabilities{
+          .present_mode = present_mode,
+          .min_image_count = caps2.surfaceCapabilities.minImageCount,
+          .max_image_count = caps2.surfaceCapabilities.maxImageCount,
+          .compatible_present_modes = std::move(compatible_modes),
+          .supported_scaling = scaling.supportedPresentScaling,
+          .supported_gravity_x = scaling.supportedPresentGravityX,
+          .supported_gravity_y = scaling.supportedPresentGravityY,
+          .min_scaled_image_extent = scaling.minScaledImageExtent,
+          .max_scaled_image_extent = scaling.maxScaledImageExtent,
+      });
+    }
+
+    return result;
   }
 
   VKAPI_ATTR VkBool32 VKAPI_CALL vulkan_debug_callback(const VkDebugUtilsMessageSeverityFlagBitsEXT severity, const VkDebugUtilsMessageTypeFlagsEXT message_type,
