@@ -38,8 +38,6 @@ TEST_CASE("Engine init creates a logical device with default requirements", "[en
 }
 
 TEST_CASE("EngineInstance init enumerates at least one ranked device candidate", "[engine][core][gpu]") {
-  // Phase 1 builds the instance/debug messenger and ranks the physical devices
-  // without creating a logical device. On a capable GPU this yields candidates.
   const std::expected<kisha::engine::EngineInstance, kisha::engine::EngineInitError> result =
     kisha::engine::EngineInstance::create();
 
@@ -64,9 +62,6 @@ TEST_CASE("EngineInstance only ranks discrete GPUs under the default spec", "[en
 }
 
 TEST_CASE("EngineCore is produced from EngineInstance with an active candidate", "[engine][core][gpu]") {
-  // Phase 2: an EngineInstance is consumed to create a single logical device for
-  // the top-ranked candidate. The resulting core must expose a valid device and a
-  // present family that mirrors the graphics family (universal-present assumption).
   std::expected<kisha::engine::EngineInstance, kisha::engine::EngineInitError> instance =
     kisha::engine::EngineInstance::create();
   REQUIRE(instance.has_value());
@@ -114,9 +109,6 @@ TEST_CASE("EngineCore exposes a profile matching the active device", "[engine][c
 }
 
 TEST_CASE("EngineCore::create_presenter fails for an empty (headless) window handle", "[engine][core][gpu]") {
-  // Phase 3: binding a Presenter requires a real native window handle. A default
-  // (monostate / headless) handle has nothing to create a surface from, so the
-  // bind must fail cleanly with SurfaceCreationFailed before touching the device.
   std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> core =
     kisha::engine::EngineCore::create();
   REQUIRE(core.has_value());
@@ -131,10 +123,6 @@ TEST_CASE("EngineCore::create_presenter fails for an empty (headless) window han
 }
 
 TEST_CASE("SurfaceCapabilities exposes sane defaults for the Phase 4 capability layer", "[engine][core]") {
-  // Phase 4 adds the surface capability layer (VK_KHR_surface_maintenance1). The
-  // live query (Presenter::capabilities) requires a real surface and is therefore
-  // [gpu]-tagged and depends on the out-of-scope windowing framework; here we only
-  // pin down the public data types and their defaults so the API surface is stable.
   const kisha::engine::PresentModeCapabilities mode_caps{};
   REQUIRE(mode_caps.present_mode == vk::PresentModeKHR::eFifo);
   REQUIRE(mode_caps.min_image_count == 0U);
@@ -148,11 +136,6 @@ TEST_CASE("SurfaceCapabilities exposes sane defaults for the Phase 4 capability 
 }
 
 TEST_CASE("SwapchainConfig exposes sane defaults for the Phase 5 swapchain layer", "[engine][core]") {
-  // Phase 5 adds swapchain creation/recreation (VK_KHR_swapchain_maintenance1).
-  // Actually creating a swapchain needs a real surface, so it is [gpu]-tagged and
-  // depends on the out-of-scope windowing framework; here we only pin the public
-  // config type and its defaults so the API surface stays stable. A zero extent /
-  // zero min_image_count signals "derive from the live surface capabilities".
   const kisha::engine::SwapchainConfig config{};
   REQUIRE(config.extent.width == 0U);
   REQUIRE(config.extent.height == 0U);
