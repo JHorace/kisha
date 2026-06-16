@@ -40,6 +40,7 @@ namespace kisha::engine {
     SurfaceCapabilityQueryFailed,
     SwapchainCreationFailed,
     NoSurfaceCapableDevice,
+    PresentFailed,
   };
 
   struct MissingNamesError {

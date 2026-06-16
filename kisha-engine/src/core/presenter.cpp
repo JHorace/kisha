@@ -140,7 +140,11 @@ namespace kisha::engine {
     return make_swapchain(device, _physical_device, _surface, _present_queue_family, config, old_handle)
         .transform([this](SwapchainBuild build) {
           if (*_swapchain != VK_NULL_HANDLE) {
-            _retired_swapchains.push_back(std::move(_swapchain));
+            _retired_swapchains.push_back(RetiredSwapchain{
+                .swapchain = std::move(_swapchain),
+                .present_fences = std::move(_present_fences),
+            });
+            _present_fences.clear();
           }
           _swapchain = std::move(build.swapchain);
           _swapchain_images = std::move(build.images);
@@ -166,5 +170,75 @@ namespace kisha::engine {
     }
     _present_mode = present_mode;
     return {};
+  }
+
+  void Presenter::prune_signaled_present_fences(const vk::raii::Device &device) {
+    std::erase_if(_present_fences, [&device](const vk::raii::Fence &fence) {
+      return device.waitForFences(*fence, VK_TRUE, 0U) == vk::Result::eSuccess;
+    });
+  }
+
+  std::expected<vk::Result, EngineInitError> Presenter::present(const vk::raii::Device &device,
+                                                                const vk::raii::Queue &queue,
+                                                                const std::uint32_t image_index,
+                                                                const vk::ArrayProxy<const vk::Semaphore>
+                                                                    &wait_semaphores) {
+    if (*_swapchain == VK_NULL_HANDLE) {
+      spdlog::error("Cannot present before the swapchain is created");
+      return std::unexpected(EngineInitError::PresentFailed);
+    }
+
+    prune_signaled_present_fences(device);
+
+    std::expected<vk::raii::Fence, vk::Result> fence = device.createFence(vk::FenceCreateInfo{});
+    if (!fence) {
+      spdlog::error("Failed to create present fence: {}", vk::to_string(fence.error()));
+      return std::unexpected(EngineInitError::PresentFailed);
+    }
+
+    const vk::SwapchainPresentModeInfoKHR present_mode_info =
+        vk::SwapchainPresentModeInfoKHR{}.setPresentModes(_present_mode);
+    const vk::SwapchainPresentFenceInfoKHR present_fence_info =
+        vk::SwapchainPresentFenceInfoKHR{}.setFences(**fence).setPNext(&present_mode_info);
+    vk::SwapchainPresentFenceInfoKHR{}.setFences(**fence);
+
+    const vk::PresentInfoKHR present_info = vk::PresentInfoKHR{}
+        .setWaitSemaphores(wait_semaphores)
+        .setSwapchains(*_swapchain)
+        .setImageIndices(image_index)
+        .setPNext(&present_fence_info);
+
+    const vk::Result result = queue.presentKHR(present_info);
+    if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR &&
+        result != vk::Result::eErrorOutOfDateKHR) {
+      spdlog::error("Failed to present swapchain image: {}", vk::to_string(result));
+      return std::unexpected(EngineInitError::PresentFailed);
+    }
+
+    if (result == vk::Result::eSuccess || result == vk::Result::eSuboptimalKHR) {
+      _present_fences.push_back(std::move(*fence));
+    }
+    return result;
+  }
+
+  std::size_t Presenter::prune_retired_swapchains(const vk::raii::Device &device) {
+    const std::size_t before = _retired_swapchains.size();
+    std::erase_if(_retired_swapchains, [&device](const RetiredSwapchain &retired) {
+      if (retired.present_fences.empty()) {
+        return true;
+      }
+      std::vector<vk::Fence> handles;
+      handles.reserve(retired.present_fences.size());
+      for (const vk::raii::Fence &fence : retired.present_fences) {
+        handles.push_back(*fence);
+      }
+      return device.waitForFences(handles, VK_TRUE, 0U) == vk::Result::eSuccess;
+    });
+
+    const std::size_t reaped = before - _retired_swapchains.size();
+    if (reaped > 0U) {
+      spdlog::debug("Pruned {} retired swapchain(s); {} still pending", reaped, _retired_swapchains.size());
+    }
+    return reaped;
   }
 }

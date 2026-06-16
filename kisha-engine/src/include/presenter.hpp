@@ -109,6 +109,14 @@ namespace kisha::engine {
     // Set present mode w/o recreating the swapchain. Totally unnecessary, but easily enabled w/ VK_EXT_swapchain_maintenance1 and surface_maintenance1 so why not
     [[nodiscard]] std::expected<void, EngineInitError> set_present_mode(vk::PresentModeKHR present_mode);
 
+    [[nodiscard]] std::expected<vk::Result, EngineInitError> present(const vk::raii::Device &device,
+                                                                     const vk::raii::Queue &queue,
+                                                                     std::uint32_t image_index,
+                                                                     const vk::ArrayProxy<const vk::Semaphore>
+                                                                         &wait_semaphores);
+
+    std::size_t prune_retired_swapchains(const vk::raii::Device &device);
+    [[nodiscard]] std::size_t retired_swapchain_count() const { return _retired_swapchains.size(); }
     [[nodiscard]] const vk::raii::SwapchainKHR &swapchain() const { return _swapchain; }
     [[nodiscard]] const std::vector<vk::Image> &swapchain_images() const { return _swapchain_images; }
     [[nodiscard]] vk::Format swapchain_format() const { return _swapchain_format; }
@@ -125,10 +133,23 @@ namespace kisha::engine {
         : _surface(std::move(surface)), _physical_device(std::move(physical_device)),
           _present_queue_family(present_queue_family) {}
 
+    // A swapchain that has been replaced (resize/format/present-mode change) but
+    // cannot be destroyed yet: it is kept alive together with the present fences
+    // of the in-flight presents that referenced it, until those fences signal.
+    struct RetiredSwapchain {
+      vk::raii::SwapchainKHR swapchain{nullptr};
+      std::vector<vk::raii::Fence> present_fences;
+    };
+
+    // Drop already-signaled present fences of the active swapchain to bound growth.
+    void prune_signaled_present_fences(const vk::raii::Device &device);
+
     // Presenter owns the surface it presents to
     vk::raii::SurfaceKHR _surface{nullptr};
     vk::raii::SwapchainKHR _swapchain{nullptr};
-    std::vector<vk::raii::SwapchainKHR> _retired_swapchains;
+    // Present fences for in-flight presents against the active swapchain.
+    std::vector<vk::raii::Fence> _present_fences;
+    std::vector<RetiredSwapchain> _retired_swapchains;
     std::vector<vk::Image> _swapchain_images;
     vk::Format _swapchain_format = vk::Format::eUndefined;
     vk::Extent2D _swapchain_extent{};
