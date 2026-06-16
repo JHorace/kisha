@@ -122,7 +122,9 @@ namespace kisha::engine {
     [[nodiscard]] const std::vector<DeviceSelection> &device_candidates() const { return _device_candidates; }
     [[nodiscard]] const EngineProfile &profile() const { return _profile; }
 
-    [[nodiscard]] std::expected<Presenter, EngineInitError> create_presenter(const NativeWindowHandle &window_handle);
+    [[nodiscard]] std::expected<Presenter *, EngineInitError> create_presenter(const NativeWindowHandle &window_handle);
+    [[nodiscard]] Presenter *presenter() { return _presenter ? &*_presenter : nullptr; }
+    [[nodiscard]] const Presenter *presenter() const { return _presenter ? &*_presenter : nullptr; }
   private:
     friend class EngineInstance;
 
@@ -141,6 +143,7 @@ namespace kisha::engine {
     vk::raii::Device _device{nullptr};
     Queues _queues{};
     EngineProfile _profile;
+    std::optional<Presenter> _presenter;
   };
 
   /**

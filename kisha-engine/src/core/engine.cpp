@@ -52,6 +52,7 @@ namespace kisha::engine {
       util::append_unique(&spec.required_extensions, VK_EXT_SHADER_OBJECT_EXTENSION_NAME);
       util::append_unique(&spec.required_extensions, VK_KHR_UNIFIED_IMAGE_LAYOUTS_EXTENSION_NAME);
       util::append_unique(&spec.required_extensions, VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME);
+      util::append_unique(&spec.required_extensions, VK_KHR_SWAPCHAIN_EXTENSION_NAME);
       util::append_unique(&spec.required_extensions, VK_KHR_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
       spec.require_discrete_gpu = true;
       return spec;
@@ -231,7 +232,7 @@ namespace kisha::engine {
     return std::unexpected(EngineInitError::NoSurfaceCapableDevice);
   }
 
-  std::expected<Presenter, EngineInitError> EngineCore::create_presenter(const NativeWindowHandle &window_handle) {
+  std::expected<Presenter *, EngineInitError> EngineCore::create_presenter(const NativeWindowHandle &window_handle) {
     std::expected<vk::raii::SurfaceKHR, EngineInitError> surface_result = util::create_surface(_instance, window_handle);
     if (!surface_result) {
       return std::unexpected(surface_result.error());
@@ -253,6 +254,8 @@ namespace kisha::engine {
     }
 
     spdlog::info("Created presentation surface (presenting device '{}')", _profile.device_name);
-    return Presenter(std::move(surface), physical_device());
+    _presenter.emplace(Presenter(std::move(surface), physical_device(),
+                                 _device_candidates[_active_candidate_index].queues.indices.present));
+    return &*_presenter;
   }
 }

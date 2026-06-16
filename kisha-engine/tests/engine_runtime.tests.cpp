@@ -121,11 +121,13 @@ TEST_CASE("EngineCore::create_presenter fails for an empty (headless) window han
     kisha::engine::EngineCore::create();
   REQUIRE(core.has_value());
 
-  const std::expected<kisha::engine::Presenter, kisha::engine::EngineInitError> presenter =
+  const std::expected<kisha::engine::Presenter *, kisha::engine::EngineInitError> presenter =
     core->create_presenter(kisha::engine::NativeWindowHandle{});
 
   REQUIRE_FALSE(presenter.has_value());
   REQUIRE(presenter.error() == kisha::engine::EngineInitError::SurfaceCreationFailed);
+  // The failed bind must not leave a dangling Presenter on the core.
+  REQUIRE(core->presenter() == nullptr);
 }
 
 TEST_CASE("SurfaceCapabilities exposes sane defaults for the Phase 4 capability layer", "[engine][core]") {
@@ -143,6 +145,22 @@ TEST_CASE("SurfaceCapabilities exposes sane defaults for the Phase 4 capability 
   REQUIRE(caps.formats.empty());
   REQUIRE(caps.present_modes.empty());
   REQUIRE(caps.per_present_mode.empty());
+}
+
+TEST_CASE("SwapchainConfig exposes sane defaults for the Phase 5 swapchain layer", "[engine][core]") {
+  // Phase 5 adds swapchain creation/recreation (VK_KHR_swapchain_maintenance1).
+  // Actually creating a swapchain needs a real surface, so it is [gpu]-tagged and
+  // depends on the out-of-scope windowing framework; here we only pin the public
+  // config type and its defaults so the API surface stays stable. A zero extent /
+  // zero min_image_count signals "derive from the live surface capabilities".
+  const kisha::engine::SwapchainConfig config{};
+  REQUIRE(config.extent.width == 0U);
+  REQUIRE(config.extent.height == 0U);
+  REQUIRE(config.surface_format.format == vk::Format::eB8G8R8A8Srgb);
+  REQUIRE(config.surface_format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear);
+  REQUIRE(config.present_mode == vk::PresentModeKHR::eFifo);
+  REQUIRE(config.min_image_count == 0U);
+  REQUIRE(config.image_usage == vk::ImageUsageFlagBits::eColorAttachment);
 }
 
 TEST_CASE("EngineInstance init reports missing required instance layers", "[engine][core]") {
