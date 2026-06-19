@@ -37,6 +37,127 @@ TEST_CASE("Engine init creates a logical device with default requirements", "[en
   REQUIRE(result.has_value());
 }
 
+TEST_CASE("EngineInstance init enumerates at least one ranked device candidate", "[engine][core][gpu]") {
+  const std::expected<kisha::engine::EngineInstance, kisha::engine::EngineInitError> result =
+    kisha::engine::EngineInstance::create();
+
+  REQUIRE(result.has_value());
+  REQUIRE_FALSE(result->device_candidates().empty());
+}
+
+TEST_CASE("EngineInstance only ranks discrete GPUs under the default spec", "[engine][core][gpu]") {
+  // The engine device baseline requires a discrete GPU, so every ranked
+  // candidate must be a discrete GPU and indices must stay in range.
+  const std::expected<kisha::engine::EngineInstance, kisha::engine::EngineInitError> result =
+    kisha::engine::EngineInstance::create();
+
+  REQUIRE(result.has_value());
+
+  const vk::raii::PhysicalDevices &devices = result->physical_devices();
+  for (const kisha::engine::DeviceSelection &candidate : result->device_candidates()) {
+    REQUIRE(candidate.index < devices.size());
+    const vk::PhysicalDeviceProperties properties = devices[candidate.index].getProperties();
+    REQUIRE(properties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu);
+  }
+}
+
+TEST_CASE("EngineCore is produced from EngineInstance with an active candidate", "[engine][core][gpu]") {
+  std::expected<kisha::engine::EngineInstance, kisha::engine::EngineInitError> instance =
+    kisha::engine::EngineInstance::create();
+  REQUIRE(instance.has_value());
+
+  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> core =
+    std::move(*instance).create_engine_core();
+
+  REQUIRE(core.has_value());
+  REQUIRE(static_cast<VkDevice>(*core->device()) != VK_NULL_HANDLE);
+  REQUIRE_FALSE(core->device_candidates().empty());
+  REQUIRE(core->queue_family_indices().present == core->queue_family_indices().graphics);
+}
+
+TEST_CASE("EngineCore::create yields a present family mirroring graphics", "[engine][core][gpu]") {
+  // The eager EngineCore::create path now delegates to the two-phase init, so it
+  // must still produce a working device whose present family mirrors graphics.
+  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> core =
+    kisha::engine::EngineCore::create();
+
+  REQUIRE(core.has_value());
+  REQUIRE(core->queue_family_indices().present == core->queue_family_indices().graphics);
+}
+
+TEST_CASE("EngineCore exposes a profile matching the active device", "[engine][core][gpu]") {
+  // The EngineProfile is populated at device creation from the active candidate's
+  // physical-device properties and the negotiated extension lists, and must agree
+  // with the live physical device exposed by the core.
+  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> core =
+    kisha::engine::EngineCore::create();
+
+  REQUIRE(core.has_value());
+
+  const kisha::engine::EngineProfile &profile = core->profile();
+  const vk::PhysicalDeviceProperties properties = core->physical_device().getProperties();
+
+  REQUIRE(profile.device_name == std::string(properties.deviceName));
+  REQUIRE(profile.device_type == properties.deviceType);
+  REQUIRE(profile.vendor_id == properties.vendorID);
+  REQUIRE(profile.device_id == properties.deviceID);
+  REQUIRE(profile.api_version == properties.apiVersion);
+  // The profile mirrors the active candidate's negotiated extension lists.
+  const kisha::engine::DeviceSelection &active = core->device_candidates().front();
+  REQUIRE(profile.enabled_extensions == active.enabled_extensions);
+  REQUIRE(profile.missing_optional_extensions == active.missing_optional_extensions);
+}
+
+TEST_CASE("EngineCore::create_presenter fails for an empty (headless) window handle", "[engine][core][gpu]") {
+  std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> core =
+    kisha::engine::EngineCore::create();
+  REQUIRE(core.has_value());
+
+  const std::expected<kisha::engine::Presenter *, kisha::engine::EngineInitError> presenter =
+    core->create_presenter(kisha::engine::NativeWindowHandle{});
+
+  REQUIRE_FALSE(presenter.has_value());
+  REQUIRE(presenter.error() == kisha::engine::EngineInitError::SurfaceCreationFailed);
+  // The failed bind must not leave a dangling Presenter on the core.
+  REQUIRE(core->presenter() == nullptr);
+}
+
+TEST_CASE("SurfaceCapabilities exposes sane defaults for the Phase 4 capability layer", "[engine][core]") {
+  const kisha::engine::PresentModeCapabilities mode_caps{};
+  REQUIRE(mode_caps.present_mode == vk::PresentModeKHR::eFifo);
+  REQUIRE(mode_caps.min_image_count == 0U);
+  REQUIRE(mode_caps.max_image_count == 0U);
+  REQUIRE(mode_caps.compatible_present_modes.empty());
+
+  const kisha::engine::SurfaceCapabilities caps{};
+  REQUIRE(caps.formats.empty());
+  REQUIRE(caps.present_modes.empty());
+  REQUIRE(caps.per_present_mode.empty());
+}
+
+TEST_CASE("SwapchainConfig exposes sane defaults for the Phase 5 swapchain layer", "[engine][core]") {
+  const kisha::engine::SwapchainConfig config{};
+  REQUIRE(config.extent.width == 0U);
+  REQUIRE(config.extent.height == 0U);
+  REQUIRE(config.surface_format.format == vk::Format::eB8G8R8A8Srgb);
+  REQUIRE(config.surface_format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear);
+  REQUIRE(config.present_mode == vk::PresentModeKHR::eFifo);
+  REQUIRE(config.min_image_count == 0U);
+  REQUIRE(config.image_usage == vk::ImageUsageFlagBits::eColorAttachment);
+}
+
+TEST_CASE("EngineInstance init reports missing required instance layers", "[engine][core]") {
+  kisha::engine::EngineCreateInfo create_info{};
+  create_info.instance_spec.min_api_version = VK_API_VERSION_1_3;
+  create_info.instance_spec.required_layers = {"VK_LAYER_KISHA_definitely_does_not_exist"};
+
+  const std::expected<kisha::engine::EngineInstance, kisha::engine::EngineInitError> result =
+    kisha::engine::EngineInstance::create(create_info);
+
+  REQUIRE_FALSE(result.has_value());
+  REQUIRE(result.error() == kisha::engine::EngineInitError::MissingRequiredLayers);
+}
+
 TEST_CASE("Engine init reports missing required instance layers", "[engine][core]") {
   kisha::engine::EngineCreateInfo create_info{};
   create_info.instance_spec.min_api_version = VK_API_VERSION_1_3;

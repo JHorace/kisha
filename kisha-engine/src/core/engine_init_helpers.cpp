@@ -7,7 +7,9 @@
 #include <optional>
 #include <ranges>
 #include <string>
+#include <type_traits>
 #include <unordered_set>
+#include <variant>
 #include <vector>
 #include <vulkan/vulkan_raii.hpp>
 
@@ -31,41 +33,41 @@ namespace kisha::engine::util {
             vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceShaderObjectFeaturesEXT,
             vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR, vk::PhysicalDeviceDescriptorBufferFeaturesEXT,
             vk::PhysicalDeviceSwapchainMaintenance1FeaturesKHR>();
-      const vk::PhysicalDeviceVulkan11Features &vulkan_11_features = feature_chain.get<vk::PhysicalDeviceVulkan11Features>();
-      const vk::PhysicalDeviceVulkan12Features &vulkan_12_features = feature_chain.get<vk::PhysicalDeviceVulkan12Features>();
-      const vk::PhysicalDeviceVulkan13Features &vulkan_13_features = feature_chain.get<vk::PhysicalDeviceVulkan13Features>();
-      const vk::PhysicalDeviceShaderObjectFeaturesEXT &shader_object_features = feature_chain.get<vk::PhysicalDeviceShaderObjectFeaturesEXT>();
-      const vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR &unified_image_layouts_features =
+      const auto &vulkan_11_features = feature_chain.get<vk::PhysicalDeviceVulkan11Features>();
+      const auto &vulkan_12_features = feature_chain.get<vk::PhysicalDeviceVulkan12Features>();
+      const auto &vulkan_13_features = feature_chain.get<vk::PhysicalDeviceVulkan13Features>();
+      const auto &shader_object_features = feature_chain.get<vk::PhysicalDeviceShaderObjectFeaturesEXT>();
+      const auto &unified_image_layouts_features =
           feature_chain.get<vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR>();
-      const vk::PhysicalDeviceDescriptorBufferFeaturesEXT &descriptor_buffer_features =
+      const auto &descriptor_buffer_features =
           feature_chain.get<vk::PhysicalDeviceDescriptorBufferFeaturesEXT>();
-      const vk::PhysicalDeviceSwapchainMaintenance1FeaturesKHR &swapchain_maintenance_1_features =
+      const auto &swapchain_maintenance_1_features =
           feature_chain.get<vk::PhysicalDeviceSwapchainMaintenance1FeaturesKHR>();
 
       if (!vulkan_11_features.shaderDrawParameters)
-        missing_features.push_back("shaderDrawParameters");
+        missing_features.emplace_back("shaderDrawParameters");
       if (!vulkan_12_features.timelineSemaphore)
-        missing_features.push_back("timelineSemaphore");
+        missing_features.emplace_back("timelineSemaphore");
       if (!vulkan_12_features.bufferDeviceAddress)
-        missing_features.push_back("bufferDeviceAddress");
+        missing_features.emplace_back("bufferDeviceAddress");
 
       if (!unified_image_layouts_features.unifiedImageLayouts)
-        missing_features.push_back("unifiedImageLayouts");
+        missing_features.emplace_back("unifiedImageLayouts");
 
       if (!vulkan_13_features.dynamicRendering)
-        missing_features.push_back("dynamicRendering");
+        missing_features.emplace_back("dynamicRendering");
 
       if (!vulkan_13_features.synchronization2)
-        missing_features.push_back("synchronization2");
+        missing_features.emplace_back("synchronization2");
 
       if (!shader_object_features.shaderObject)
-        missing_features.push_back("shaderObject");
+        missing_features.emplace_back("shaderObject");
 
       if (!descriptor_buffer_features.descriptorBuffer)
-        missing_features.push_back("descriptorBuffer");
+        missing_features.emplace_back("descriptorBuffer");
 
       if (!swapchain_maintenance_1_features.swapchainMaintenance1)
-        missing_features.push_back("swapchainMaintenance1");
+        missing_features.emplace_back("swapchainMaintenance1");
 
       return missing_features;
     }
@@ -247,6 +249,7 @@ std::expected<QueueSelection, EngineInitError> select_queue_families(const vk::r
     .indices =
       QueueFamilyIndices{
         .graphics = *graphics_family,
+        .present = *graphics_family,
         .async_compute = async_compute_family,
         .transfer = transfer_family,
       },
@@ -255,7 +258,7 @@ std::expected<QueueSelection, EngineInitError> select_queue_families(const vk::r
   };
 }
   
-std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(const vk::raii::PhysicalDevices &physical_devices,
+std::expected<std::vector<DeviceSelection>, NoSuitableDeviceError> rank_physical_devices(const vk::raii::PhysicalDevices &physical_devices,
                                                                             const DeviceSpec &device_spec) {
   struct Candidate {
     std::size_t index = 0U;
@@ -351,31 +354,35 @@ std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(con
     }
   }
 
-  // Prefer the discrete GPU satisfying the most optional extensions; ties keep the first found.
-  const auto best_by_optional = [](const std::vector<Candidate> &candidates) -> const Candidate * {
-    const Candidate *best = nullptr;
-    for (const Candidate &candidate : candidates) {
-      if (best == nullptr || candidate.satisfied_optional > best->satisfied_optional) {
-        best = &candidate;
-      }
-    }
-    return best;
+  // Order each tier by the number of satisfied optional extensions, best first;
+  // ties keep enumeration order. Discrete GPUs always precede integrated ones.
+  const auto by_optional_desc = [](const Candidate &a, const Candidate &b) {
+    return a.satisfied_optional > b.satisfied_optional;
   };
+  std::ranges::stable_sort(discrete_candidates, by_optional_desc);
+  std::ranges::stable_sort(integrated_candidates, by_optional_desc);
 
-  const Candidate *selected = best_by_optional(discrete_candidates);
-
-  if (selected == nullptr && !device_spec.require_discrete_gpu) {
-    // Only fall back to an integrated GPU when a discrete one is not required and none is suitable.
-    selected = best_by_optional(integrated_candidates);
+  std::vector<Candidate> ordered = std::move(discrete_candidates);
+  if (!device_spec.require_discrete_gpu) {
+    // Integrated GPUs are only viable when a discrete GPU is not required.
+    for (Candidate &candidate : integrated_candidates) {
+      ordered.push_back(std::move(candidate));
+    }
+    integrated_candidates.clear();
   }
 
-  if (selected != nullptr) {
-    return DeviceSelection{
-      .index = selected->index,
-      .queues = selected->queues,
-      .enabled_extensions = selected->enabled_extensions,
-      .missing_optional_extensions = selected->missing_optional_extensions,
-    };
+  if (!ordered.empty()) {
+    std::vector<DeviceSelection> selections;
+    selections.reserve(ordered.size());
+    for (Candidate &candidate : ordered) {
+      selections.push_back(DeviceSelection{
+        .index = candidate.index,
+        .queues = candidate.queues,
+        .enabled_extensions = std::move(candidate.enabled_extensions),
+        .missing_optional_extensions = std::move(candidate.missing_optional_extensions),
+      });
+    }
+    return selections;
   }
 
   // No device was selected: any otherwise-suitable integrated GPU was rejected
@@ -396,6 +403,12 @@ std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(con
   return std::unexpected(NoSuitableDeviceError{.candidates = std::move(rejected)});
 }
 
+std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(const vk::raii::PhysicalDevices &physical_devices,
+                                                                            const DeviceSpec &device_spec) {
+  return rank_physical_devices(physical_devices, device_spec)
+      .transform([](std::vector<DeviceSelection> selections) { return std::move(selections.front()); });
+}
+
   std::vector<vk::DeviceQueueCreateInfo> build_queue_create_infos(const QueueSelection &queues) {
     std::vector<std::uint32_t> unique_families;
     const auto add_family = [&](const std::uint32_t family) {
@@ -404,6 +417,7 @@ std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(con
       }
     };
     add_family(queues.indices.graphics);
+    add_family(queues.indices.present);
     if (queues.indices.async_compute.has_value()) {
       add_family(*queues.indices.async_compute);
     }
@@ -464,6 +478,138 @@ std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(con
     if (queues.indices.transfer.has_value()) {
       result.transfer = device.getQueue(*queues.indices.transfer, 0U);
     }
+    return result;
+  }
+
+  std::expected<vk::raii::SurfaceKHR, EngineInitError> create_surface(const vk::raii::Instance &instance,
+                                                                      const NativeWindowHandle &window_handle) {
+    const auto map_error = [](const vk::Result result) {
+      spdlog::error("Failed to create surface: {}", vk::to_string(result));
+      return EngineInitError::SurfaceCreationFailed;
+    };
+
+    return std::visit(
+        [&](const auto &handle) -> std::expected<vk::raii::SurfaceKHR, EngineInitError> {
+          using Handle = std::decay_t<decltype(handle)>;
+          if constexpr (std::is_same_v<Handle, std::monostate>) {
+            spdlog::error("Cannot create a surface from an empty (headless) native window handle");
+            return std::unexpected(EngineInitError::SurfaceCreationFailed);
+          }
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+          else if constexpr (std::is_same_v<Handle, WaylandWindowHandle>) {
+            return instance
+                .createWaylandSurfaceKHR(
+                    vk::WaylandSurfaceCreateInfoKHR{}.setDisplay(handle.display).setSurface(handle.surface))
+                .transform_error(map_error);
+          }
+#endif
+#ifdef VK_USE_PLATFORM_XCB_KHR
+          else if constexpr (std::is_same_v<Handle, XcbWindowHandle>) {
+            return instance
+                .createXcbSurfaceKHR(
+                    vk::XcbSurfaceCreateInfoKHR{}.setConnection(handle.connection).setWindow(handle.window))
+                .transform_error(map_error);
+          }
+#endif
+#ifdef VK_USE_PLATFORM_XLIB_KHR
+          else if constexpr (std::is_same_v<Handle, XlibWindowHandle>) {
+            return instance
+                .createXlibSurfaceKHR(vk::XlibSurfaceCreateInfoKHR{}.setDpy(handle.display).setWindow(handle.window))
+                .transform_error(map_error);
+          }
+#endif
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+          else if constexpr (std::is_same_v<Handle, Win32WindowHandle>) {
+            return instance
+                .createWin32SurfaceKHR(
+                    vk::Win32SurfaceCreateInfoKHR{}.setHinstance(handle.hinstance).setHwnd(handle.hwnd))
+                .transform_error(map_error);
+          }
+#endif
+          else {
+            return std::unexpected(EngineInitError::SurfaceCreationFailed);
+          }
+        },
+        window_handle);
+  }
+
+  std::expected<SurfaceCapabilities, EngineInitError> query_surface_capabilities(const vk::raii::PhysicalDevice &physical_device,
+                                                                                 const vk::raii::SurfaceKHR &surface) {
+    const auto map_error = [](const vk::Result result, const std::string_view what) {
+      spdlog::error("Failed to query surface {}: {}", what, vk::to_string(result));
+      return EngineInitError::SurfaceCapabilityQueryFailed;
+    };
+
+    const vk::PhysicalDeviceSurfaceInfo2KHR surface_info = vk::PhysicalDeviceSurfaceInfo2KHR{}.setSurface(*surface);
+
+    SurfaceCapabilities result{};
+
+    {
+      const std::expected<vk::SurfaceCapabilities2KHR, vk::Result> caps2 = physical_device.getSurfaceCapabilities2KHR(surface_info);
+      if (!caps2) {
+        return std::unexpected(map_error(caps2.error(), "capabilities"));
+      }
+      result.capabilities = caps2->surfaceCapabilities;
+    }
+
+    {
+      const std::expected<std::vector<vk::SurfaceFormat2KHR>, vk::Result> formats2 = physical_device.getSurfaceFormats2KHR(surface_info);
+      if (!formats2) {
+        return std::unexpected(map_error(formats2.error(), "formats"));
+      }
+      result.formats.reserve(formats2->size());
+      for (const vk::SurfaceFormat2KHR &format : *formats2) {
+        result.formats.push_back(format.surfaceFormat);
+      }
+    }
+
+    {
+      std::expected<std::vector<vk::PresentModeKHR>, vk::Result> present_modes = physical_device.getSurfacePresentModesKHR(*surface);
+      if (!present_modes) {
+        return std::unexpected(map_error(present_modes.error(), "present modes"));
+      }
+      result.present_modes = std::move(*present_modes);
+    }
+
+    result.per_present_mode.reserve(result.present_modes.size());
+    for (const vk::PresentModeKHR present_mode : result.present_modes) {
+      const vk::SurfacePresentModeKHR present_mode_info = vk::SurfacePresentModeKHR{}.setPresentMode(present_mode);
+      const vk::PhysicalDeviceSurfaceInfo2KHR mode_surface_info =
+          vk::PhysicalDeviceSurfaceInfo2KHR{}.setSurface(*surface).setPNext(&present_mode_info);
+
+      vk::SurfaceCapabilities2KHR caps2{};
+      vk::SurfacePresentScalingCapabilitiesKHR scaling{};
+      vk::SurfacePresentModeCompatibilityKHR compatibility{};
+      caps2.pNext = &compatibility;
+      compatibility.pNext = &scaling;
+
+      const vk::Result count_result = physical_device.getSurfaceCapabilities2KHR(&mode_surface_info, &caps2);
+      if (count_result != vk::Result::eSuccess) {
+        return std::unexpected(map_error(count_result, "present-mode capabilities"));
+      }
+
+      std::vector<vk::PresentModeKHR> compatible_modes(compatibility.presentModeCount);
+      compatibility.setPPresentModes(compatible_modes.data());
+
+      const vk::Result data_result = physical_device.getSurfaceCapabilities2KHR(&mode_surface_info, &caps2);
+      if (data_result != vk::Result::eSuccess) {
+        return std::unexpected(map_error(data_result, "present-mode capabilities"));
+      }
+      compatible_modes.resize(compatibility.presentModeCount);
+
+      result.per_present_mode.push_back(PresentModeCapabilities{
+          .present_mode = present_mode,
+          .min_image_count = caps2.surfaceCapabilities.minImageCount,
+          .max_image_count = caps2.surfaceCapabilities.maxImageCount,
+          .compatible_present_modes = std::move(compatible_modes),
+          .supported_scaling = scaling.supportedPresentScaling,
+          .supported_gravity_x = scaling.supportedPresentGravityX,
+          .supported_gravity_y = scaling.supportedPresentGravityY,
+          .min_scaled_image_extent = scaling.minScaledImageExtent,
+          .max_scaled_image_extent = scaling.maxScaledImageExtent,
+      });
+    }
+
     return result;
   }
 

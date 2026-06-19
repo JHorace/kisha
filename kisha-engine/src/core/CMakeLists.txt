@@ -4,4 +4,5 @@ target_sources(
         engine.cpp
         engine_init_helpers.cpp
         errors.cpp
+        presenter.cpp
 )

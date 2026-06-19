@@ -8,8 +8,10 @@
 
 #include <vulkan/vulkan_raii.hpp>
 #include <expected>
+#include <variant>
 
 #include "errors.hpp"
+#include "presenter.hpp"
 
 namespace kisha::engine {
   /**
@@ -17,6 +19,7 @@ namespace kisha::engine {
    */
   struct QueueFamilyIndices {
     std::uint32_t graphics = 0;
+    std::uint32_t present = 0;
     std::optional<std::uint32_t> async_compute;
     std::optional<std::uint32_t> transfer;
   };
@@ -28,6 +31,25 @@ namespace kisha::engine {
     vk::raii::Queue graphics{nullptr};
     std::optional<vk::raii::Queue> async_compute;
     std::optional<vk::raii::Queue> transfer;
+  };
+
+  /**
+   * @brief Information about selected queue families and queue topology
+   */
+  struct QueueSelection {
+    QueueFamilyIndices indices;
+    bool has_dedicated_async_compute = false;
+    bool has_dedicated_transfer = false;
+  };
+
+  /**
+   * @brief Selected physical-device including negotiated profile.
+   */
+  struct DeviceSelection {
+    std::size_t index = 0U;
+    QueueSelection queues{};
+    std::vector<std::string> enabled_extensions;
+    std::vector<std::string> missing_optional_extensions;
   };
 
   /**
@@ -89,18 +111,71 @@ namespace kisha::engine {
 
     EngineCore(const EngineCore &) = delete;
     EngineCore &operator=(const EngineCore &) = delete;
+
+    [[nodiscard]] const vk::raii::Device &device() const { return _device; }
+    [[nodiscard]] const vk::raii::PhysicalDevice &physical_device() const {
+      return _physical_devices[_device_candidates[_active_candidate_index].index];
+    }
+    [[nodiscard]] const QueueFamilyIndices &queue_family_indices() const {
+      return _device_candidates[_active_candidate_index].queues.indices;
+    }
+    [[nodiscard]] const std::vector<DeviceSelection> &device_candidates() const { return _device_candidates; }
+    [[nodiscard]] const EngineProfile &profile() const { return _profile; }
+
+    [[nodiscard]] std::expected<Presenter *, EngineInitError> create_presenter(const NativeWindowHandle &window_handle);
+    [[nodiscard]] Presenter *presenter() { return _presenter ? &*_presenter : nullptr; }
+    [[nodiscard]] const Presenter *presenter() const { return _presenter ? &*_presenter : nullptr; }
   private:
+    friend class EngineInstance;
+
+    std::expected<void, EngineInitError> reselect_device_for_surface(const vk::raii::SurfaceKHR &surface);
 
     EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance, vk::raii::DebugUtilsMessengerEXT &&debug_messenger,
-               vk::raii::PhysicalDevice &&physical_device, vk::raii::Device &&device, Queues &&queues, EngineProfile &&profile);
+               vk::raii::PhysicalDevices &&physical_devices, std::vector<DeviceSelection> &&device_candidates,
+               std::size_t active_candidate_index, vk::raii::Device &&device, Queues &&queues, EngineProfile &&profile);
 
     vk::raii::Context _context;
     vk::raii::Instance _instance{nullptr};
     vk::raii::DebugUtilsMessengerEXT _debug_messenger{nullptr};
-    vk::raii::PhysicalDevice _physical_device{nullptr};
+    vk::raii::PhysicalDevices _physical_devices{nullptr};
+    std::vector<DeviceSelection> _device_candidates;
+    std::size_t _active_candidate_index = 0U;
     vk::raii::Device _device{nullptr};
     Queues _queues{};
     EngineProfile _profile;
+    std::optional<Presenter> _presenter;
+  };
+
+  /**
+   * @brief EngineInstance is an EngineCore without a device. It enumerates and exposes all the details needed to
+   *        select and create a device. On
+   */
+  class EngineInstance {
+  public:
+    static std::expected<EngineInstance, EngineInitError> create(const EngineCreateInfo &create_info = {});
+
+    //RAII type, so can only be move assigned/constructed
+    EngineInstance(EngineInstance &&other) noexcept = default;
+    EngineInstance &operator=(EngineInstance &&other) noexcept = default;
+
+    EngineInstance(const EngineInstance &) = delete;
+    EngineInstance &operator=(const EngineInstance &) = delete;
+
+    [[nodiscard]] const vk::raii::Instance &instance() const { return instance_; }
+    [[nodiscard]] const vk::raii::PhysicalDevices &physical_devices() const { return physical_devices_; }
+    [[nodiscard]] const std::vector<DeviceSelection> &device_candidates() const { return device_candidates_; }
+
+    [[nodiscard]] std::expected<EngineCore, EngineInitError> create_engine_core() &&;
+  private:
+    EngineInstance(vk::raii::Context &&context, vk::raii::Instance &&instance,
+                   vk::raii::DebugUtilsMessengerEXT &&debug_messenger, vk::raii::PhysicalDevices &&physical_devices,
+                   std::vector<DeviceSelection> &&device_candidates);
+
+    vk::raii::Context context_;
+    vk::raii::Instance instance_{nullptr};
+    vk::raii::DebugUtilsMessengerEXT debug_messenger_{nullptr};
+    vk::raii::PhysicalDevices physical_devices_{nullptr};
+    std::vector<DeviceSelection> device_candidates_;
   };
 }
 

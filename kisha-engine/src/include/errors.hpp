@@ -35,6 +35,12 @@ namespace kisha::engine {
     NoSuitableDevice,
     InstanceCreationFailed,
     DeviceCreationFailed,
+    NoPresentCapableQueue,
+    SurfaceCreationFailed,
+    SurfaceCapabilityQueryFailed,
+    SwapchainCreationFailed,
+    NoSurfaceCapableDevice,
+    PresentFailed,
   };
 
   struct MissingNamesError {
