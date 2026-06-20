@@ -8,9 +8,11 @@
 
 #include <vulkan/vulkan_raii.hpp>
 #include <expected>
+#include <optional>
 #include <variant>
 
 #include "errors.hpp"
+#include "swapchain.hpp"
 
 namespace kisha::engine {
   class EngineCore;
@@ -60,33 +62,6 @@ namespace kisha::engine {
 #endif
       >;
 
-  struct PresentModeCapabilities {
-    vk::PresentModeKHR present_mode = vk::PresentModeKHR::eFifo;
-    std::uint32_t min_image_count = 0U;
-    std::uint32_t max_image_count = 0U;
-    std::vector<vk::PresentModeKHR> compatible_present_modes;
-    vk::PresentScalingFlagsKHR supported_scaling{};
-    vk::PresentGravityFlagsKHR supported_gravity_x{};
-    vk::PresentGravityFlagsKHR supported_gravity_y{};
-    vk::Extent2D min_scaled_image_extent{};
-    vk::Extent2D max_scaled_image_extent{};
-  };
-
-  struct SurfaceCapabilities {
-    vk::SurfaceCapabilitiesKHR capabilities{};
-    std::vector<vk::SurfaceFormatKHR> formats;
-    std::vector<vk::PresentModeKHR> present_modes;
-    std::vector<PresentModeCapabilities> per_present_mode;
-  };
-
-  struct SwapchainConfig {
-    vk::Extent2D extent{};
-    vk::SurfaceFormatKHR surface_format{vk::Format::eB8G8R8A8Srgb, vk::ColorSpaceKHR::eSrgbNonlinear};
-    vk::PresentModeKHR present_mode = vk::PresentModeKHR::eFifo;
-    std::uint32_t min_image_count = 0U;
-    vk::ImageUsageFlags image_usage = vk::ImageUsageFlagBits::eColorAttachment;
-  };
-
   /**
    * @brief Owns the engine-created presentation surface, and eventually the swapchain.
    */
@@ -117,13 +92,15 @@ namespace kisha::engine {
 
     std::size_t prune_retired_swapchains(const vk::raii::Device &device);
     [[nodiscard]] std::size_t retired_swapchain_count() const { return _retired_swapchains.size(); }
-    [[nodiscard]] const vk::raii::SwapchainKHR &swapchain() const { return _swapchain; }
-    [[nodiscard]] const std::vector<vk::Image> &swapchain_images() const { return _swapchain_images; }
-    [[nodiscard]] vk::Format swapchain_format() const { return _swapchain_format; }
-    [[nodiscard]] vk::Extent2D swapchain_extent() const { return _swapchain_extent; }
-    [[nodiscard]] vk::PresentModeKHR present_mode() const { return _present_mode; }
+    [[nodiscard]] bool has_swapchain() const { return _swapchain.has_value(); }
+    [[nodiscard]] const Swapchain &swapchain() const { return *_swapchain; }
+    [[nodiscard]] const vk::raii::SwapchainKHR &swapchain_handle() const { return _swapchain->handle(); }
+    [[nodiscard]] const std::vector<vk::Image> &swapchain_images() const { return _swapchain->images(); }
+    [[nodiscard]] vk::Format swapchain_format() const { return _swapchain->format(); }
+    [[nodiscard]] vk::Extent2D swapchain_extent() const { return _swapchain->extent(); }
+    [[nodiscard]] vk::PresentModeKHR present_mode() const { return _swapchain->present_mode(); }
     [[nodiscard]] const std::vector<vk::PresentModeKHR> &compatible_present_modes() const {
-      return _compatible_present_modes;
+      return _swapchain->compatible_present_modes();
     }
   private:
     friend class EngineCore;
@@ -137,7 +114,7 @@ namespace kisha::engine {
     // cannot be destroyed yet: it is kept alive together with the present fences
     // of the in-flight presents that referenced it, until those fences signal.
     struct RetiredSwapchain {
-      vk::raii::SwapchainKHR swapchain{nullptr};
+      Swapchain swapchain;
       std::vector<vk::raii::Fence> present_fences;
     };
 
@@ -146,15 +123,10 @@ namespace kisha::engine {
 
     // Presenter owns the surface it presents to
     vk::raii::SurfaceKHR _surface{nullptr};
-    vk::raii::SwapchainKHR _swapchain{nullptr};
+    std::optional<Swapchain> _swapchain;
     // Present fences for in-flight presents against the active swapchain.
     std::vector<vk::raii::Fence> _present_fences;
     std::vector<RetiredSwapchain> _retired_swapchains;
-    std::vector<vk::Image> _swapchain_images;
-    vk::Format _swapchain_format = vk::Format::eUndefined;
-    vk::Extent2D _swapchain_extent{};
-    vk::PresentModeKHR _present_mode = vk::PresentModeKHR::eFifo;
-    std::vector<vk::PresentModeKHR> _compatible_present_modes;
     // Presenter doesn't own the physical device
     // these aren't real handles, so this is valid as long as the Presenter doesn't outlive the instance.
     vk::raii::PhysicalDevice _physical_device{nullptr};

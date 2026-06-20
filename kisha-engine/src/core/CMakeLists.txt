@@ -5,4 +5,5 @@ target_sources(
         engine_init_helpers.cpp
         errors.cpp
         presenter.cpp
+        swapchain.cpp
 )
