@@ -12,6 +12,7 @@
 #include <variant>
 
 #include "errors.hpp"
+#include "framecontext.hpp"
 #include "swapchain.hpp"
 
 namespace kisha::engine {
@@ -93,6 +94,8 @@ namespace kisha::engine {
     std::size_t prune_retired_swapchains(const vk::raii::Device &device);
     [[nodiscard]] std::size_t retired_swapchain_count() const { return _retired_swapchains.size(); }
     [[nodiscard]] bool has_swapchain() const { return _swapchain.has_value(); }
+    [[nodiscard]] bool has_frame_context() const { return _frame_context.has_value(); }
+    [[nodiscard]] const FrameContext &frame_context() const { return *_frame_context; }
     [[nodiscard]] const Swapchain &swapchain() const { return *_swapchain; }
     [[nodiscard]] const vk::raii::SwapchainKHR &swapchain_handle() const { return _swapchain->handle(); }
     [[nodiscard]] const std::vector<vk::Image> &swapchain_images() const { return _swapchain->images(); }
@@ -121,9 +124,13 @@ namespace kisha::engine {
     // Drop already-signaled present fences of the active swapchain to bound growth.
     void prune_signaled_present_fences(const vk::raii::Device &device);
 
+    [[nodiscard]] std::expected<void, EngineInitError> create_frame_context(const vk::raii::Device &device);
+
     // Presenter owns the surface it presents to
     vk::raii::SurfaceKHR _surface{nullptr};
     std::optional<Swapchain> _swapchain;
+    // Per-frame sync objects, built alongside the swapchain.
+    std::optional<FrameContext> _frame_context;
     // Present fences for in-flight presents against the active swapchain.
     std::vector<vk::raii::Fence> _present_fences;
     std::vector<RetiredSwapchain> _retired_swapchains;

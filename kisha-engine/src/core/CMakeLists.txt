@@ -4,6 +4,7 @@ target_sources(
         engine.cpp
         engine_init_helpers.cpp
         errors.cpp
+        framecontext.cpp
         presenter.cpp
         swapchain.cpp
 )

@@ -20,11 +20,12 @@ namespace kisha::engine {
     }
 
     return Swapchain::create(device, _physical_device, _surface, _present_queue_family, config)
-        .transform([this](Swapchain swapchain) {
+        .and_then([this, &device](Swapchain swapchain) -> std::expected<void, EngineInitError> {
           _swapchain = std::move(swapchain);
           spdlog::info("Created swapchain ({} images, {}x{}, {})", _swapchain->images().size(),
                        _swapchain->extent().width, _swapchain->extent().height,
                        vk::to_string(_swapchain->present_mode()));
+          return create_frame_context(device);
         });
   }
 
@@ -33,7 +34,7 @@ namespace kisha::engine {
     const vk::SwapchainKHR old_handle = _swapchain.has_value() ? *_swapchain->handle() : VK_NULL_HANDLE;
 
     return Swapchain::create(device, _physical_device, _surface, _present_queue_family, config, old_handle)
-        .transform([this](Swapchain swapchain) {
+        .and_then([this, &device](Swapchain swapchain) -> std::expected<void, EngineInitError> {
           if (_swapchain.has_value()) {
             _retired_swapchains.push_back(RetiredSwapchain{
                 .swapchain = std::move(*_swapchain),
@@ -45,7 +46,17 @@ namespace kisha::engine {
           spdlog::info("Recreated swapchain ({} images, {}x{}, {}); {} retired swapchain(s) pending",
                        _swapchain->images().size(), _swapchain->extent().width, _swapchain->extent().height,
                        vk::to_string(_swapchain->present_mode()), _retired_swapchains.size());
+          return create_frame_context(device);
         });
+  }
+
+  std::expected<void, EngineInitError> Presenter::create_frame_context(const vk::raii::Device &device) {
+    const auto image_count = static_cast<std::uint32_t>(_swapchain->images().size());
+    return FrameContext::create(device, image_count).transform([this](FrameContext frame_context) {
+      _frame_context = std::move(frame_context);
+      spdlog::info("Created frame context ({} frames in flight, {} render-finished semaphores)",
+                   FrameContext::MAX_FRAMES_IN_FLIGHT, _frame_context->image_count());
+    });
   }
 
   std::expected<void, EngineInitError> Presenter::set_present_mode(const vk::PresentModeKHR present_mode) {

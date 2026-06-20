@@ -41,6 +41,7 @@ namespace kisha::engine {
     SwapchainCreationFailed,
     NoSurfaceCapableDevice,
     PresentFailed,
+    FrameSyncCreationFailed,
   };
 
   struct MissingNamesError {
