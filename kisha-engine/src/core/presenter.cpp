@@ -6,6 +6,8 @@
 #include "engine_init_helpers.hpp"
 
 #include <algorithm>
+#include <limits>
+#include <utility>
 #include <spdlog/spdlog.h>
 
 namespace kisha::engine {
@@ -20,8 +22,9 @@ namespace kisha::engine {
     }
 
     return Swapchain::create(device, _physical_device, _surface, _present_queue_family, config)
-        .and_then([this, &device](Swapchain swapchain) -> std::expected<void, EngineInitError> {
+        .and_then([this, &device, &config](Swapchain swapchain) -> std::expected<void, EngineInitError> {
           _swapchain = std::move(swapchain);
+          _active_config = config;
           spdlog::info("Created swapchain ({} images, {}x{}, {})", _swapchain->images().size(),
                        _swapchain->extent().width, _swapchain->extent().height,
                        vk::to_string(_swapchain->present_mode()));
@@ -34,7 +37,7 @@ namespace kisha::engine {
     const vk::SwapchainKHR old_handle = _swapchain.has_value() ? *_swapchain->handle() : VK_NULL_HANDLE;
 
     return Swapchain::create(device, _physical_device, _surface, _present_queue_family, config, old_handle)
-        .and_then([this, &device](Swapchain swapchain) -> std::expected<void, EngineInitError> {
+        .and_then([this, &device, &config](Swapchain swapchain) -> std::expected<void, EngineInitError> {
           if (_swapchain.has_value()) {
             _retired_swapchains.push_back(RetiredSwapchain{
                 .swapchain = std::move(*_swapchain),
@@ -43,6 +46,7 @@ namespace kisha::engine {
             _present_fences.clear();
           }
           _swapchain = std::move(swapchain);
+          _active_config = config;
           spdlog::info("Recreated swapchain ({} images, {}x{}, {}); {} retired swapchain(s) pending",
                        _swapchain->images().size(), _swapchain->extent().width, _swapchain->extent().height,
                        vk::to_string(_swapchain->present_mode()), _retired_swapchains.size());
@@ -57,6 +61,10 @@ namespace kisha::engine {
       spdlog::info("Created frame context ({} frames in flight, {} render-finished semaphores)",
                    FrameContext::MAX_FRAMES_IN_FLIGHT, _frame_context->image_count());
     });
+  }
+
+  std::expected<void, EngineInitError> Presenter::recreate_for_current_surface(const vk::raii::Device &device) {
+    return recreate_swapchain(device, _active_config);
   }
 
   std::expected<void, EngineInitError> Presenter::set_present_mode(const vk::PresentModeKHR present_mode) {
@@ -80,12 +88,60 @@ namespace kisha::engine {
     });
   }
 
+  std::expected<AcquiredFrame, EngineInitError> Presenter::acquire_next_image(const vk::raii::Device &device) {
+    if (!_swapchain.has_value() || !_frame_context.has_value()) {
+      spdlog::error("Cannot acquire an image before the swapchain is created");
+      return std::unexpected(EngineInitError::ImageAcquisitionFailed);
+    }
+
+    const std::uint32_t frame = _frame_context->current_frame();
+    const vk::Fence in_flight = *_frame_context->in_flight(frame);
+    const vk::Semaphore image_available = *_frame_context->image_available(frame);
+
+    // Block until the previous use of this frame has completed.
+    if (const vk::Result wait =
+            device.waitForFences(in_flight, VK_TRUE, std::numeric_limits<std::uint64_t>::max());
+        wait != vk::Result::eSuccess) {
+      spdlog::error("Failed to wait on in-flight fence: {}", vk::to_string(wait));
+      return std::unexpected(EngineInitError::ImageAcquisitionFailed);
+    }
+
+    const vk::ResultValue<std::uint32_t> acquired =
+        _swapchain->handle().acquireNextImage(std::numeric_limits<std::uint64_t>::max(), image_available);
+    const vk::Result result = acquired.result;
+    if (result == vk::Result::eErrorOutOfDateKHR) {
+      spdlog::info("Swapchain out of date on acquire; recreating");
+      if (std::expected<void, EngineInitError> recreated = recreate_for_current_surface(device); !recreated) {
+        return std::unexpected(recreated.error());
+      }
+      return AcquiredFrame{.result = vk::Result::eErrorOutOfDateKHR};
+    }
+    if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR) {
+      spdlog::error("Failed to acquire swapchain image: {}", vk::to_string(result));
+      return std::unexpected(EngineInitError::ImageAcquisitionFailed);
+    }
+
+    const std::uint32_t image_index = acquired.value;
+
+    if (const std::expected<void, vk::Result> reset = device.resetFences(in_flight); !reset) {
+      spdlog::error("Failed to reset in-flight fence: {}", vk::to_string(reset.error()));
+      return std::unexpected(EngineInitError::ImageAcquisitionFailed);
+    }
+
+    _frame_context->set_current_image_index(image_index);
+    return AcquiredFrame{
+        .result = result,
+        .image_index = image_index,
+        .image_available = image_available,
+        .render_finished = *_frame_context->render_finished(image_index),
+        .in_flight = in_flight,
+    };
+  }
+
   std::expected<vk::Result, EngineInitError> Presenter::present(const vk::raii::Device &device,
                                                                 const vk::raii::Queue &queue,
-                                                                const std::uint32_t image_index,
-                                                                const vk::ArrayProxy<const vk::Semaphore>
-                                                                    &wait_semaphores) {
-    if (!_swapchain.has_value()) {
+                                                                const std::uint32_t image_index) {
+    if (!_swapchain.has_value() || !_frame_context.has_value()) {
       spdlog::error("Cannot present before the swapchain is created");
       return std::unexpected(EngineInitError::PresentFailed);
     }
@@ -98,6 +154,7 @@ namespace kisha::engine {
       return std::unexpected(EngineInitError::PresentFailed);
     }
 
+    const vk::Semaphore render_finished = *_frame_context->render_finished(image_index);
     const vk::PresentModeKHR present_mode = _swapchain->present_mode();
     const vk::SwapchainPresentModeInfoKHR present_mode_info =
         vk::SwapchainPresentModeInfoKHR{}.setPresentModes(present_mode);
@@ -105,7 +162,7 @@ namespace kisha::engine {
         vk::SwapchainPresentFenceInfoKHR{}.setFences(**fence).setPNext(&present_mode_info);
 
     const vk::PresentInfoKHR present_info = vk::PresentInfoKHR{}
-        .setWaitSemaphores(wait_semaphores)
+        .setWaitSemaphores(render_finished)
         .setSwapchains(*_swapchain->handle())
         .setImageIndices(image_index)
         .setPNext(&present_fence_info);
@@ -119,6 +176,14 @@ namespace kisha::engine {
 
     if (result == vk::Result::eSuccess || result == vk::Result::eSuboptimalKHR) {
       _present_fences.push_back(std::move(*fence));
+    }
+    _frame_context->advance_frame();
+
+    if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR) {
+      spdlog::info("Swapchain {} on present; recreating", vk::to_string(result));
+      if (std::expected<void, EngineInitError> recreated = recreate_for_current_surface(device); !recreated) {
+        return std::unexpected(recreated.error());
+      }
     }
     return result;
   }

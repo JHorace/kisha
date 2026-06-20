@@ -63,6 +63,14 @@ namespace kisha::engine {
 #endif
       >;
 
+  struct AcquiredFrame {
+    vk::Result result = vk::Result::eErrorOutOfDateKHR;
+    std::uint32_t image_index = 0U;
+    vk::Semaphore image_available{};
+    vk::Semaphore render_finished{};
+    vk::Fence in_flight{};
+  };
+
   /**
    * @brief Owns the engine-created presentation surface, and eventually the swapchain.
    */
@@ -85,11 +93,11 @@ namespace kisha::engine {
     // Set present mode w/o recreating the swapchain. Totally unnecessary, but easily enabled w/ VK_EXT_swapchain_maintenance1 and surface_maintenance1 so why not
     [[nodiscard]] std::expected<void, EngineInitError> set_present_mode(vk::PresentModeKHR present_mode);
 
+    [[nodiscard]] std::expected<AcquiredFrame, EngineInitError> acquire_next_image(const vk::raii::Device &device);
+
     [[nodiscard]] std::expected<vk::Result, EngineInitError> present(const vk::raii::Device &device,
                                                                      const vk::raii::Queue &queue,
-                                                                     std::uint32_t image_index,
-                                                                     const vk::ArrayProxy<const vk::Semaphore>
-                                                                         &wait_semaphores);
+                                                                     std::uint32_t image_index);
 
     std::size_t prune_retired_swapchains(const vk::raii::Device &device);
     [[nodiscard]] std::size_t retired_swapchain_count() const { return _retired_swapchains.size(); }
@@ -126,9 +134,12 @@ namespace kisha::engine {
 
     [[nodiscard]] std::expected<void, EngineInitError> create_frame_context(const vk::raii::Device &device);
 
+    [[nodiscard]] std::expected<void, EngineInitError> recreate_for_current_surface(const vk::raii::Device &device);
+
     // Presenter owns the surface it presents to
     vk::raii::SurfaceKHR _surface{nullptr};
     std::optional<Swapchain> _swapchain;
+    SwapchainConfig _active_config;
     // Per-frame sync objects, built alongside the swapchain.
     std::optional<FrameContext> _frame_context;
     // Present fences for in-flight presents against the active swapchain.

@@ -42,6 +42,7 @@ namespace kisha::engine {
     NoSurfaceCapableDevice,
     PresentFailed,
     FrameSyncCreationFailed,
+    ImageAcquisitionFailed,
   };
 
   struct MissingNamesError {
