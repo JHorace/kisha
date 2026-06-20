@@ -16,7 +16,7 @@ namespace kisha::engine {
   // like Swapchain, only producible through create(): a present FrameContext
   // always wraps real sync objects.
   /**
-   * Owns per-frame synchronization primitives - basically encapsulates a 'frame-in-flight'
+   * Owns per-frame synchronization primitives - basically encapsulates 'frames-in-flight'
    * One important distinction to remember is that 'frames-in-flight' are not necessarily the same as swapchain images.
    * 'Frames-in-flight' are an application notion - the number of frame command buffers the application allows itself to record before it starts blocking on the present fence.
    * Swapchain images are a GPU resource notion - The number of images that are actually available to render to and present.
