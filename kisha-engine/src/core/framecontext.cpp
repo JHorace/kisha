@@ -28,21 +28,10 @@ namespace kisha::engine {
       in_flight.push_back(std::move(*fence));
     }
 
-    std::vector<vk::raii::Semaphore> render_finished;
-    render_finished.reserve(image_count);
-    for (std::uint32_t image = 0U; image < image_count; ++image) {
-      std::expected<vk::raii::Semaphore, vk::Result> semaphore = device.createSemaphore(vk::SemaphoreCreateInfo{});
-      if (!semaphore) {
-        spdlog::error("Failed to create render-finished semaphore: {}", vk::to_string(semaphore.error()));
-        return std::unexpected(EngineInitError::FrameSyncCreationFailed);
-      }
-      render_finished.push_back(std::move(*semaphore));
-    }
-
     FrameContext result;
     result._image_available = std::move(image_available);
     result._in_flight = std::move(in_flight);
-    result._render_finished = std::move(render_finished);
+    result._image_count = image_count;
     return result;
   }
 }

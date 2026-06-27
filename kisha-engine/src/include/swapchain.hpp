@@ -64,6 +64,9 @@ namespace kisha::engine {
     [[nodiscard]] const std::vector<vk::PresentModeKHR> &compatible_present_modes() const {
       return _compatible_present_modes;
     }
+    [[nodiscard]] const vk::raii::Semaphore &render_finished(std::uint32_t image_index) const {
+      return _render_finished[image_index];
+    }
 
     /**
      * We use VK_KHR_swapchain_maintenance1 and VK_KHR_surface_maintenance1, so in theory we can change the present mode w/o recreating the swapchain.
@@ -98,6 +101,7 @@ namespace kisha::engine {
     vk::Extent2D _extent{};
     vk::PresentModeKHR _present_mode = vk::PresentModeKHR::eFifo;
     std::vector<vk::PresentModeKHR> _compatible_present_modes;
+    std::vector<vk::raii::Semaphore> _render_finished;
   };
 }
 

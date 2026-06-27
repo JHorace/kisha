@@ -133,7 +133,7 @@ namespace kisha::engine {
         .result = result,
         .image_index = image_index,
         .image_available = image_available,
-        .render_finished = *_frame_context->render_finished(image_index),
+        .render_finished = *_swapchain->render_finished(image_index),
         .in_flight = in_flight,
     };
   }
@@ -154,7 +154,7 @@ namespace kisha::engine {
       return std::unexpected(EngineInitError::PresentFailed);
     }
 
-    const vk::Semaphore render_finished = *_frame_context->render_finished(image_index);
+    const vk::Semaphore render_finished = *_swapchain->render_finished(image_index);
     const vk::PresentModeKHR present_mode = _swapchain->present_mode();
     const vk::SwapchainPresentModeInfoKHR present_mode_info =
         vk::SwapchainPresentModeInfoKHR{}.setPresentModes(present_mode);

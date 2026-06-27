@@ -9,16 +9,10 @@
 #include "errors.hpp"
 
 namespace kisha::engine {
-  // Owns the transient per-frame synchronization primitives used to drive the
-  // frames-in-flight render loop. Image-available semaphores and in-flight fences
-  // are per frame-in-flight slot; render-finished semaphores are per swapchain
-  // image (to avoid the semaphore-reuse hazard with present). Move-only and,
-  // like Swapchain, only producible through create(): a present FrameContext
-  // always wraps real sync objects.
   /**
-   * Owns per-frame synchronization primitives - basically encapsulates 'frames-in-flight'
+   * Owns per-frame resources - basically encapsulates 'frames-in-flight'
    * One important distinction to remember is that 'frames-in-flight' are not necessarily the same as swapchain images.
-   * 'Frames-in-flight' are an application notion - the number of frame command buffers the application allows itself to record before it starts blocking on the present fence.
+   * 'Frames-in-flight' are an application notion - the number of frame command lists the application allows itself to record before it starts blocking on the present fence.
    * Swapchain images are a GPU resource notion - The number of images that are actually available to render to and present.
    * They're likely to both be around 2 or 3, but they are still different knobs that affect presentation timing differently.
    */
@@ -40,14 +34,10 @@ namespace kisha::engine {
       return _image_available[frame];
     }
     [[nodiscard]] const vk::raii::Fence &in_flight(std::uint32_t frame) const { return _in_flight[frame]; }
-    [[nodiscard]] const vk::raii::Semaphore &render_finished(std::uint32_t image_index) const {
-      return _render_finished[image_index];
-    }
-
     [[nodiscard]] std::uint32_t current_frame() const { return _current_frame; }
     [[nodiscard]] std::uint32_t current_image_index() const { return _current_image_index; }
     [[nodiscard]] std::uint32_t image_count() const {
-      return static_cast<std::uint32_t>(_render_finished.size());
+      return _image_count;
     }
 
     void set_current_image_index(std::uint32_t image_index) { _current_image_index = image_index; }
@@ -58,7 +48,7 @@ namespace kisha::engine {
 
     std::vector<vk::raii::Semaphore> _image_available;
     std::vector<vk::raii::Fence> _in_flight;
-    std::vector<vk::raii::Semaphore> _render_finished;
+    std::uint32_t _image_count = 0U;
     std::uint32_t _current_frame = 0U;
     std::uint32_t _current_image_index = 0U;
   };

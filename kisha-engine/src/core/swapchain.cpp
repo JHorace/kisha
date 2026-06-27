@@ -112,6 +112,17 @@ namespace kisha::engine {
       image_views.push_back(std::move(*view));
     }
 
+    std::vector<vk::raii::Semaphore> render_finished;
+    render_finished.reserve(image_count);
+    for (std::uint32_t image = 0U; image < image_count; ++image) {
+      std::expected<vk::raii::Semaphore, vk::Result> semaphore = device.createSemaphore(vk::SemaphoreCreateInfo{});
+      if (!semaphore) {
+        spdlog::error("Failed to create render-finished semaphore: {}", vk::to_string(semaphore.error()));
+        return std::unexpected(EngineInitError::FrameSyncCreationFailed);
+      }
+      render_finished.push_back(std::move(*semaphore));
+    }
+
     Swapchain result;
     result._swapchain = std::move(*swapchain);
     result._images = std::move(*images);
@@ -120,6 +131,7 @@ namespace kisha::engine {
     result._extent = extent;
     result._present_mode = config.present_mode;
     result._compatible_present_modes = std::move(compatible_modes);
+    result._render_finished = std::move(render_finished);
     return result;
   }
 }
