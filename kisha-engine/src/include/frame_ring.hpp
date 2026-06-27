@@ -32,13 +32,19 @@ namespace kisha::engine {
     FrameRing &operator=(const FrameRing &) = delete;
 
     [[nodiscard]] static std::expected<FrameRing, EngineError> create(const vk::raii::Device &device,
-                                                                             std::uint32_t frame_count);
+                                                                             std::uint32_t frame_count,
+                                                                             const std::vector<std::uint32_t> &queue_families);
 
     [[nodiscard]] std::expected<FrameResources, EngineError> begin_frame(const vk::raii::Device& device);
 
   private:
-    FrameRing(vk::raii::Semaphore&& frame_timeline);
+    FrameRing(vk::raii::Semaphore&& frame_timeline,
+              std::vector<std::vector<vk::raii::CommandPool>>&& command_pools,
+              std::vector<std::uint32_t> queue_families);
     vk::raii::Semaphore _frame_timeline;
+    std::vector<std::vector<vk::raii::CommandPool>> _command_pools = {};
+    // The distinct queue family indices the command pools were created for.
+    std::vector<std::uint32_t> _queue_families = {};
     std::vector<uint64_t> _frame_slot = {};
     std::vector<uint64_t> _submit_index = {};
     uint64_t _frame_counter = 0U;
