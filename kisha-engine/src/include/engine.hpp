@@ -12,6 +12,7 @@
 
 #include "errors.hpp"
 #include "presenter.hpp"
+#include "frame_ring.hpp"
 
 namespace kisha::engine {
   /**
@@ -103,7 +104,7 @@ namespace kisha::engine {
    */
   class EngineCore {
   public:
-    static std::expected<EngineCore, EngineInitError> create(const EngineCreateInfo& create_info = {});
+    static std::expected<EngineCore, EngineError> create(const EngineCreateInfo& create_info = {});
 
     //RAII type, so can only be move assigned/constructed
     EngineCore(EngineCore &&other) noexcept = default;
@@ -122,17 +123,19 @@ namespace kisha::engine {
     [[nodiscard]] const std::vector<DeviceSelection> &device_candidates() const { return _device_candidates; }
     [[nodiscard]] const EngineProfile &profile() const { return _profile; }
 
-    [[nodiscard]] std::expected<Presenter *, EngineInitError> create_presenter(const NativeWindowHandle &window_handle);
+    [[nodiscard]] std::expected<Presenter *, EngineError> create_presenter(const NativeWindowHandle &window_handle);
     [[nodiscard]] Presenter *presenter() { return _presenter ? &*_presenter : nullptr; }
     [[nodiscard]] const Presenter *presenter() const { return _presenter ? &*_presenter : nullptr; }
+
+    void begin_frame();
   private:
     friend class EngineInstance;
 
-    std::expected<void, EngineInitError> reselect_device_for_surface(const vk::raii::SurfaceKHR &surface);
+    std::expected<void, EngineError> reselect_device_for_surface(const vk::raii::SurfaceKHR &surface);
 
     EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance, vk::raii::DebugUtilsMessengerEXT &&debug_messenger,
                vk::raii::PhysicalDevices &&physical_devices, std::vector<DeviceSelection> &&device_candidates,
-               std::size_t active_candidate_index, vk::raii::Device &&device, Queues &&queues, EngineProfile &&profile);
+               std::size_t active_candidate_index, vk::raii::Device &&device, FrameRing &&frame_ring, Queues &&queues, EngineProfile &&profile);
 
     vk::raii::Context _context;
     vk::raii::Instance _instance{nullptr};
@@ -141,6 +144,7 @@ namespace kisha::engine {
     std::vector<DeviceSelection> _device_candidates;
     std::size_t _active_candidate_index = 0U;
     vk::raii::Device _device{nullptr};
+    FrameRing _frame_ring;
     Queues _queues{};
     EngineProfile _profile;
     std::optional<Presenter> _presenter;
@@ -152,7 +156,7 @@ namespace kisha::engine {
    */
   class EngineInstance {
   public:
-    static std::expected<EngineInstance, EngineInitError> create(const EngineCreateInfo &create_info = {});
+    static std::expected<EngineInstance, EngineError> create(const EngineCreateInfo &create_info = {});
 
     //RAII type, so can only be move assigned/constructed
     EngineInstance(EngineInstance &&other) noexcept = default;
@@ -165,7 +169,7 @@ namespace kisha::engine {
     [[nodiscard]] const vk::raii::PhysicalDevices &physical_devices() const { return physical_devices_; }
     [[nodiscard]] const std::vector<DeviceSelection> &device_candidates() const { return device_candidates_; }
 
-    [[nodiscard]] std::expected<EngineCore, EngineInitError> create_engine_core() &&;
+    [[nodiscard]] std::expected<EngineCore, EngineError> create_engine_core() &&;
   private:
     EngineInstance(vk::raii::Context &&context, vk::raii::Instance &&instance,
                    vk::raii::DebugUtilsMessengerEXT &&debug_messenger, vk::raii::PhysicalDevices &&physical_devices,

@@ -58,7 +58,7 @@ namespace kisha::engine {
       return spec;
     }
 
-    std::expected<vk::raii::DebugUtilsMessengerEXT, EngineInitError> create_debug_messenger(const vk::raii::Instance &instance,
+    std::expected<vk::raii::DebugUtilsMessengerEXT, EngineError> create_debug_messenger(const vk::raii::Instance &instance,
                                                                                             const bool enable_validation) {
       if (!enable_validation) {
         return vk::raii::DebugUtilsMessengerEXT{nullptr};
@@ -72,7 +72,7 @@ namespace kisha::engine {
       return instance.createDebugUtilsMessengerEXT(debug_create_info)
           .transform_error([](const vk::Result result) {
             spdlog::error("Failed to create debug utils messenger: {}", vk::to_string(result));
-            return EngineInitError::InstanceCreationFailed;
+            return EngineError::InstanceCreationFailed;
           });
     }
 
@@ -94,7 +94,7 @@ namespace kisha::engine {
       };
     }
 
-    std::expected<DeviceBundle, EngineInitError> build_device_bundle(const vk::raii::PhysicalDevice &physical_device,
+    std::expected<DeviceBundle, EngineError> build_device_bundle(const vk::raii::PhysicalDevice &physical_device,
                                                                      const DeviceSelection &selection) {
       EngineProfile profile = build_profile(physical_device.getProperties(), selection);
       return util::create_logical_device(physical_device, selection.queues, selection.enabled_extensions)
@@ -108,7 +108,7 @@ namespace kisha::engine {
   EngineCore::EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance,
                          vk::raii::DebugUtilsMessengerEXT &&debug_messenger, vk::raii::PhysicalDevices &&physical_devices,
                          std::vector<DeviceSelection> &&device_candidates, const size_t active_candidate_index,
-                         vk::raii::Device &&device, Queues &&queues, EngineProfile &&profile)
+                         vk::raii::Device &&device, FrameRing&& frame_ring, Queues &&queues, EngineProfile &&profile)
       : _context(std::move(context)),
         _instance(std::move(instance)),
         _debug_messenger(std::move(debug_messenger)),
@@ -116,10 +116,11 @@ namespace kisha::engine {
         _device_candidates(std::move(device_candidates)),
         _active_candidate_index(active_candidate_index),
         _device(std::move(device)),
+        _frame_ring(std::move(frame_ring)),
         _queues(std::move(queues)),
         _profile(std::move(profile)) {}
 
-  std::expected<EngineCore, EngineInitError> EngineCore::create(const EngineCreateInfo &create_info) {
+  std::expected<EngineCore, EngineError> EngineCore::create(const EngineCreateInfo &create_info) {
     return EngineInstance::create(create_info)
         .and_then([](EngineInstance engine_instance) { return std::move(engine_instance).create_engine_core(); });
   }
@@ -134,12 +135,12 @@ namespace kisha::engine {
         physical_devices_(std::move(physical_devices)),
         device_candidates_(std::move(device_candidates)) {}
 
-  std::expected<EngineInstance, EngineInitError> EngineInstance::create(const EngineCreateInfo &create_info) {
+  std::expected<EngineInstance, EngineError> EngineInstance::create(const EngineCreateInfo &create_info) {
     const InstanceSpec instance_spec = util::reconcile(engine_instance_baseline(create_info), create_info.instance_spec);
     const DeviceSpec device_spec = util::reconcile(engine_device_baseline(), create_info.device_spec);
 
     if (instance_spec.min_api_version < VK_API_VERSION_1_3) {
-      return std::unexpected(EngineInitError::ApiVersionTooLow);
+      return std::unexpected(EngineError::ApiVersionTooLow);
     }
 
     vk::raii::Context context;
@@ -152,13 +153,13 @@ namespace kisha::engine {
         .setApiVersion(instance_spec.min_api_version);
 
     return util::create_instance(context, application_info, instance_spec.required_layers, instance_spec.required_extensions)
-        .and_then([&](vk::raii::Instance instance) -> std::expected<EngineInstance, EngineInitError> {
+        .and_then([&](vk::raii::Instance instance) -> std::expected<EngineInstance, EngineError> {
           return create_debug_messenger(instance, create_info.enable_validation)
-              .and_then([&](vk::raii::DebugUtilsMessengerEXT debug_messenger) -> std::expected<EngineInstance, EngineInitError> {
+              .and_then([&](vk::raii::DebugUtilsMessengerEXT debug_messenger) -> std::expected<EngineInstance, EngineError> {
                 std::expected<vk::raii::PhysicalDevices, vk::Result> physical_devices_result = instance.enumeratePhysicalDevices();
                 if (!physical_devices_result) {
                   spdlog::error("Failed to enumerate physical devices: {}", vk::to_string(physical_devices_result.error()));
-                  return std::unexpected(EngineInitError::NoSuitableDevice);
+                  return std::unexpected(EngineError::NoSuitableDevice);
                 }
                 vk::raii::PhysicalDevices physical_devices = std::move(*physical_devices_result);
 
@@ -166,7 +167,7 @@ namespace kisha::engine {
                     util::rank_physical_devices(physical_devices, device_spec);
                 if (!candidates) {
                   log_error(candidates.error());
-                  return std::unexpected(EngineInitError::NoSuitableDevice);
+                  return std::unexpected(EngineError::NoSuitableDevice);
                 }
 
                 const vk::PhysicalDeviceProperties preferred_properties =
@@ -180,10 +181,10 @@ namespace kisha::engine {
         });
   }
 
-  std::expected<EngineCore, EngineInitError> EngineInstance::create_engine_core() && {
+  std::expected<EngineCore, EngineError> EngineInstance::create_engine_core() && {
     if (device_candidates_.empty()) {
       spdlog::error("Cannot create a logical device: no suitable physical-device candidates");
-      return std::unexpected(EngineInitError::NoSuitableDevice);
+      return std::unexpected(EngineError::NoSuitableDevice);
     }
 
     constexpr std::size_t active_candidate_index = 0U;
@@ -195,14 +196,27 @@ namespace kisha::engine {
                  std::string(properties.deviceName), selection.queues.indices.graphics, selection.queues.indices.present);
 
     return build_device_bundle(physical_device, selection)
-        .transform([&](DeviceBundle bundle) {
-          return EngineCore(std::move(context_), std::move(instance_), std::move(debug_messenger_),
-                            std::move(physical_devices_), std::move(device_candidates_), active_candidate_index,
-                            std::move(bundle.device), std::move(bundle.queues), std::move(bundle.profile));
+        .and_then([&](DeviceBundle bundle) -> std::expected<EngineCore, EngineError>{
+          return FrameRing::create(bundle.device, FrameRing::FRAMES_IN_FLIGHT)
+              .transform([&, bundle = std::move(bundle)](FrameRing ring) mutable {
+                return EngineCore(std::move(context_), std::move(instance_), std::move(debug_messenger_),
+                                  std::move(physical_devices_), std::move(device_candidates_), active_candidate_index,
+                                  std::move(bundle.device), std::move(ring), std::move(bundle.queues), std::move(bundle.profile));
+              });
         });
   }
 
-  std::expected<void, EngineInitError> EngineCore::reselect_device_for_surface(const vk::raii::SurfaceKHR &surface) {
+  void EngineCore::begin_frame() {
+    auto maybe_frame = _frame_ring.begin_frame(_device);
+
+    if (!maybe_frame) {
+
+    }
+
+    (void)_presenter.value().acquire_next_image(_device, maybe_frame.value().frame_slot);
+  }
+
+  std::expected<void, EngineError> EngineCore::reselect_device_for_surface(const vk::raii::SurfaceKHR &surface) {
     for (std::size_t index = 0U; index < _device_candidates.size(); ++index) {
       if (index == _active_candidate_index) {
         continue;
@@ -214,7 +228,7 @@ namespace kisha::engine {
         continue;
       }
 
-      std::expected<DeviceBundle, EngineInitError> bundle =
+      std::expected<DeviceBundle, EngineError> bundle =
           build_device_bundle(_physical_devices[candidate.index], candidate);
       if (!bundle) {
         return std::unexpected(bundle.error());
@@ -229,11 +243,11 @@ namespace kisha::engine {
     }
 
     spdlog::error("No physical-device candidate can present to the requested surface");
-    return std::unexpected(EngineInitError::NoSurfaceCapableDevice);
+    return std::unexpected(EngineError::NoSurfaceCapableDevice);
   }
 
-  std::expected<Presenter *, EngineInitError> EngineCore::create_presenter(const NativeWindowHandle &window_handle) {
-    std::expected<vk::raii::SurfaceKHR, EngineInitError> surface_result = util::create_surface(_instance, window_handle);
+  std::expected<Presenter *, EngineError> EngineCore::create_presenter(const NativeWindowHandle &window_handle) {
+    std::expected<vk::raii::SurfaceKHR, EngineError> surface_result = util::create_surface(_instance, window_handle);
     if (!surface_result) {
       return std::unexpected(surface_result.error());
     }
@@ -247,7 +261,7 @@ namespace kisha::engine {
 
     if (!active_supports) {
       // Rare: the preferred device cannot present to this surface. Switch to a ranked candidate that can before binding it.
-      std::expected<void, EngineInitError> reselected = reselect_device_for_surface(surface);
+      std::expected<void, EngineError> reselected = reselect_device_for_surface(surface);
       if (!reselected) {
         return std::unexpected(reselected.error());
       }

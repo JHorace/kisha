@@ -32,13 +32,13 @@ namespace kisha::engine {
     }
   }
 
-  std::expected<Swapchain, EngineInitError> Swapchain::create(const vk::raii::Device &device,
+  std::expected<Swapchain, EngineError> Swapchain::create(const vk::raii::Device &device,
                                                               const vk::raii::PhysicalDevice &physical_device,
                                                               const vk::raii::SurfaceKHR &surface,
                                                               const std::uint32_t present_queue_family,
                                                               const SwapchainConfig &config,
                                                               const vk::SwapchainKHR old_swapchain) {
-    std::expected<SurfaceCapabilities, EngineInitError> caps = util::query_surface_capabilities(physical_device, surface);
+    std::expected<SurfaceCapabilities, EngineError> caps = util::query_surface_capabilities(physical_device, surface);
     if (!caps) {
       return std::unexpected(caps.error());
     }
@@ -80,13 +80,13 @@ namespace kisha::engine {
     std::expected<vk::raii::SwapchainKHR, vk::Result> swapchain = device.createSwapchainKHR(create_info);
     if (!swapchain) {
       spdlog::error("Failed to create swapchain: {}", vk::to_string(swapchain.error()));
-      return std::unexpected(EngineInitError::SwapchainCreationFailed);
+      return std::unexpected(EngineError::SwapchainCreationFailed);
     }
 
     std::expected<std::vector<vk::Image>, vk::Result> images = swapchain->getImages();
     if (!images) {
       spdlog::error("Failed to retrieve swapchain images: {}", vk::to_string(images.error()));
-      return std::unexpected(EngineInitError::SwapchainCreationFailed);
+      return std::unexpected(EngineError::SwapchainCreationFailed);
     }
 
     std::vector<vk::raii::ImageView> image_views;
@@ -107,7 +107,7 @@ namespace kisha::engine {
       std::expected<vk::raii::ImageView, vk::Result> view = device.createImageView(view_info);
       if (!view) {
         spdlog::error("Failed to create swapchain image view: {}", vk::to_string(view.error()));
-        return std::unexpected(EngineInitError::SwapchainCreationFailed);
+        return std::unexpected(EngineError::SwapchainCreationFailed);
       }
       image_views.push_back(std::move(*view));
     }
@@ -118,7 +118,7 @@ namespace kisha::engine {
       std::expected<vk::raii::Semaphore, vk::Result> semaphore = device.createSemaphore(vk::SemaphoreCreateInfo{});
       if (!semaphore) {
         spdlog::error("Failed to create render-finished semaphore: {}", vk::to_string(semaphore.error()));
-        return std::unexpected(EngineInitError::FrameSyncCreationFailed);
+        return std::unexpected(EngineError::FrameSyncCreationFailed);
       }
       render_finished.push_back(std::move(*semaphore));
     }

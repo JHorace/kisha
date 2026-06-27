@@ -12,7 +12,6 @@
 #include <variant>
 
 #include "errors.hpp"
-#include "framecontext.hpp"
 #include "swapchain.hpp"
 
 namespace kisha::engine {
@@ -67,8 +66,6 @@ namespace kisha::engine {
     vk::Result result = vk::Result::eErrorOutOfDateKHR;
     std::uint32_t image_index = 0U;
     vk::Semaphore image_available{};
-    vk::Semaphore render_finished{};
-    vk::Fence in_flight{};
   };
 
   /**
@@ -83,27 +80,25 @@ namespace kisha::engine {
     Presenter &operator=(const Presenter &) = delete;
 
     [[nodiscard]] const vk::raii::SurfaceKHR &surface() const { return _surface; }
-    [[nodiscard]] std::expected<SurfaceCapabilities, EngineInitError> capabilities() const;
+    [[nodiscard]] std::expected<SurfaceCapabilities, EngineError> capabilities() const;
 
-    [[nodiscard]] std::expected<void, EngineInitError> create_swapchain(const vk::raii::Device &device,
+    [[nodiscard]] std::expected<void, EngineError> create_swapchain(const vk::raii::Device &device,
                                                                         const SwapchainConfig &config);
-    [[nodiscard]] std::expected<void, EngineInitError> recreate_swapchain(const vk::raii::Device &device,
+    [[nodiscard]] std::expected<void, EngineError> recreate_swapchain(const vk::raii::Device &device,
                                                                           const SwapchainConfig &config);
 
     // Set present mode w/o recreating the swapchain. Totally unnecessary, but easily enabled w/ VK_EXT_swapchain_maintenance1 and surface_maintenance1 so why not
-    [[nodiscard]] std::expected<void, EngineInitError> set_present_mode(vk::PresentModeKHR present_mode);
+    [[nodiscard]] std::expected<void, EngineError> set_present_mode(vk::PresentModeKHR present_mode);
 
-    [[nodiscard]] std::expected<AcquiredFrame, EngineInitError> acquire_next_image(const vk::raii::Device &device);
+    [[nodiscard]] std::expected<AcquiredFrame, EngineError> acquire_next_image(const vk::raii::Device &device, uint32_t frame_index);
 
-    [[nodiscard]] std::expected<vk::Result, EngineInitError> present(const vk::raii::Device &device,
+    [[nodiscard]] std::expected<vk::Result, EngineError> present(const vk::raii::Device &device,
                                                                      const vk::raii::Queue &queue,
                                                                      std::uint32_t image_index);
 
     std::size_t prune_retired_swapchains(const vk::raii::Device &device);
     [[nodiscard]] std::size_t retired_swapchain_count() const { return _retired_swapchains.size(); }
     [[nodiscard]] bool has_swapchain() const { return _swapchain.has_value(); }
-    [[nodiscard]] bool has_frame_context() const { return _frame_context.has_value(); }
-    [[nodiscard]] const FrameContext &frame_context() const { return *_frame_context; }
     [[nodiscard]] const Swapchain &swapchain() const { return *_swapchain; }
     [[nodiscard]] const vk::raii::SwapchainKHR &swapchain_handle() const { return _swapchain->handle(); }
     [[nodiscard]] const std::vector<vk::Image> &swapchain_images() const { return _swapchain->images(); }
@@ -129,21 +124,14 @@ namespace kisha::engine {
       std::vector<vk::raii::Fence> present_fences;
     };
 
-    // Drop already-signaled present fences of the active swapchain to bound growth.
-    void prune_signaled_present_fences(const vk::raii::Device &device);
-
-    [[nodiscard]] std::expected<void, EngineInitError> create_frame_context(const vk::raii::Device &device);
-
-    [[nodiscard]] std::expected<void, EngineInitError> recreate_for_current_surface(const vk::raii::Device &device);
+    [[nodiscard]] std::expected<void, EngineError> recreate_for_current_surface(const vk::raii::Device &device);
 
     // Presenter owns the surface it presents to
     vk::raii::SurfaceKHR _surface{nullptr};
     std::optional<Swapchain> _swapchain;
     SwapchainConfig _active_config;
-    // Per-frame sync objects, built alongside the swapchain.
-    std::optional<FrameContext> _frame_context;
     // Present fences for in-flight presents against the active swapchain.
-    std::vector<vk::raii::Fence> _present_fences;
+    std::vector<vk::raii::Semaphore> _image_available_sempahors;
     std::vector<RetiredSwapchain> _retired_swapchains;
     // Presenter doesn't own the physical device
     // these aren't real handles, so this is valid as long as the Presenter doesn't outlive the instance.
