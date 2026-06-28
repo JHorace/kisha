@@ -43,6 +43,11 @@ namespace kisha::engine {
     PresentFailed,
     FrameSyncCreationFailed,
     ImageAcquisitionFailed,
+    PipelineCreationFailed,
+    ShaderModuleCreationFailed,
+    CommandRecordingFailed,
+    SubmitFailed,
+    UnknownResource,
   };
 
   struct MissingNamesError {
