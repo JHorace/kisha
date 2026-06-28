@@ -4,6 +4,7 @@
 #include <vulkan/vulkan_raii.hpp>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <vector>
 
 #include "errors.hpp"
@@ -12,6 +13,9 @@ namespace kisha::engine {
 
   struct FrameResources {
     uint32_t frame_slot;
+    vk::raii::CommandBuffer graphics_command_buffer;
+    std::optional<vk::raii::CommandBuffer> async_compute_command_buffer;
+    std::optional<vk::raii::CommandBuffer> transfer_command_buffer;
   };
 
   /**
@@ -33,18 +37,23 @@ namespace kisha::engine {
 
     [[nodiscard]] static std::expected<FrameRing, EngineError> create(const vk::raii::Device &device,
                                                                              std::uint32_t frame_count,
-                                                                             const std::vector<std::uint32_t> &queue_families);
+                                                                             std::uint32_t graphics_family,
+                                                                             std::optional<std::uint32_t> async_compute_family,
+                                                                             std::optional<std::uint32_t> transfer_family);
 
-    [[nodiscard]] std::expected<FrameResources, EngineError> begin_frame(const vk::raii::Device& device);
+    [[nodiscard]] std::expected<FrameResources *, EngineError> begin_frame(const vk::raii::Device& device);
 
   private:
     FrameRing(vk::raii::Semaphore&& frame_timeline,
               std::vector<std::vector<vk::raii::CommandPool>>&& command_pools,
-              std::vector<std::uint32_t> queue_families);
+              std::vector<FrameResources>&& frames);
     vk::raii::Semaphore _frame_timeline;
+    // Per-frame command pools, dimensioned (threads) x (frames-in-flight) x (distinct queue families).
+    // Single-threaded for now, so the outer vector is indexed by frame slot, the inner by distinct
+    // queue family. The pools must outlive the command buffers in _frames that were allocated from them.
     std::vector<std::vector<vk::raii::CommandPool>> _command_pools = {};
-    // The distinct queue family indices the command pools were created for.
-    std::vector<std::uint32_t> _queue_families = {};
+    // Per-frame-slot resources (command buffers) allocated up front from _command_pools.
+    std::vector<FrameResources> _frames = {};
     std::vector<uint64_t> _frame_slot = {};
     std::vector<uint64_t> _submit_index = {};
     uint64_t _frame_counter = 0U;

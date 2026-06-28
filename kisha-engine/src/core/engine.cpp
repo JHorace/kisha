@@ -9,8 +9,6 @@
 #include <spdlog/spdlog.h>
 #include <spdlog/fmt/ranges.h>
 
-#include <algorithm>
-
 namespace kisha::engine {
   namespace {
     /**
@@ -197,26 +195,12 @@ namespace kisha::engine {
     spdlog::info("Creating logical device on '{}' (graphics family {}, present family {})",
                  std::string(properties.deviceName), selection.queues.indices.graphics, selection.queues.indices.present);
 
-    // The frame ring needs a command pool per (thread, frame-in-flight, queue family). Collect the
-    // distinct queue family indices the engine uses so each gets its own set of per-frame pools.
-    std::vector<std::uint32_t> queue_families;
-    const auto add_queue_family = [&queue_families](const std::uint32_t family) {
-      if (std::ranges::find(queue_families, family) == queue_families.end()) {
-        queue_families.push_back(family);
-      }
-    };
     const QueueFamilyIndices &indices = selection.queues.indices;
-    add_queue_family(indices.graphics);
-    if (indices.async_compute) {
-      add_queue_family(*indices.async_compute);
-    }
-    if (indices.transfer) {
-      add_queue_family(*indices.transfer);
-    }
 
     return build_device_bundle(physical_device, selection)
         .and_then([&](DeviceBundle bundle) -> std::expected<EngineCore, EngineError>{
-          return FrameRing::create(bundle.device, FrameRing::FRAMES_IN_FLIGHT, queue_families)
+          return FrameRing::create(bundle.device, FrameRing::FRAMES_IN_FLIGHT, indices.graphics,
+                                   indices.async_compute, indices.transfer)
               .transform([&, bundle = std::move(bundle)](FrameRing ring) mutable {
                 return EngineCore(std::move(context_), std::move(instance_), std::move(debug_messenger_),
                                   std::move(physical_devices_), std::move(device_candidates_), active_candidate_index,
@@ -232,7 +216,7 @@ namespace kisha::engine {
 
     }
 
-    (void)_presenter.value().acquire_next_image(_device, maybe_frame.value().frame_slot);
+    (void)_presenter.value().acquire_next_image(_device, maybe_frame.value()->frame_slot);
   }
 
   std::expected<void, EngineError> EngineCore::reselect_device_for_surface(const vk::raii::SurfaceKHR &surface) {
