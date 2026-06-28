@@ -64,7 +64,7 @@ namespace kisha::engine {
 
     std::vector<std::vector<vk::raii::CommandPool>> command_pools;
     command_pools.reserve(FRAMES_IN_FLIGHT);
-    std::vector<FrameResources> frames;
+    std::vector<FrameRecorder> frames;
     frames.reserve(FRAMES_IN_FLIGHT);
 
     for (std::uint32_t frame = 0U; frame < FRAMES_IN_FLIGHT; ++frame) {
@@ -111,7 +111,7 @@ namespace kisha::engine {
         transfer_command_buffer = std::move(*buffer);
       }
 
-      frames.push_back(FrameResources{
+      frames.push_back(FrameRecorder{
           .frame_slot = frame,
           .graphics_command_buffer = std::move(*graphics_command_buffer),
           .async_compute_command_buffer = std::move(async_compute_command_buffer),
@@ -123,7 +123,7 @@ namespace kisha::engine {
     return FrameRing(std::move(*semaphore), std::move(command_pools), std::move(frames));
   }
 
-  std::expected<FrameResources *, EngineError> FrameRing::begin_frame(const vk::raii::Device &device) {
+  std::expected<FrameRecorder *, EngineError> FrameRing::begin_frame(const vk::raii::Device &device) {
     uint32_t slot = _frame_counter % FRAMES_IN_FLIGHT;
 
     // Timeline semaphores let us signal/wait on a particular value - this simplifies synchronization a lot as we can essentially wait on a specific frame to finish rendering.
@@ -138,7 +138,7 @@ namespace kisha::engine {
 
   FrameRing::FrameRing(vk::raii::Semaphore &&frame_timeline,
                        std::vector<std::vector<vk::raii::CommandPool>> &&command_pools,
-                       std::vector<FrameResources> &&frames)
+                       std::vector<FrameRecorder> &&frames)
       : _frame_timeline(std::move(frame_timeline)),
         _command_pools(std::move(command_pools)),
         _frames(std::move(frames)) {

@@ -79,6 +79,12 @@ namespace kisha::engine {
     Presenter(const Presenter &) = delete;
     Presenter &operator=(const Presenter &) = delete;
 
+    [[nodiscard]] static std::expected<Presenter, EngineError> create(vk::raii::SurfaceKHR &&surface,
+                                                                       vk::raii::PhysicalDevice physical_device,
+                                                                       std::uint32_t present_queue_family,
+                                                                       const vk::raii::Device &device,
+                                                                       std::uint32_t frames_in_flight);
+
     [[nodiscard]] const vk::raii::SurfaceKHR &surface() const { return _surface; }
     [[nodiscard]] std::expected<SurfaceCapabilities, EngineError> capabilities() const;
 
@@ -126,12 +132,13 @@ namespace kisha::engine {
 
     [[nodiscard]] std::expected<void, EngineError> recreate_for_current_surface(const vk::raii::Device &device);
 
+    [[nodiscard]] std::expected<void, EngineError> create_frame_semaphores(const vk::raii::Device &device,
+                                                                           std::uint32_t frames_in_flight);
     // Presenter owns the surface it presents to
     vk::raii::SurfaceKHR _surface{nullptr};
     std::optional<Swapchain> _swapchain;
     SwapchainConfig _active_config;
-    // Present fences for in-flight presents against the active swapchain.
-    std::vector<vk::raii::Semaphore> _image_available_sempahors;
+    std::vector<vk::raii::Semaphore> _image_available_semaphores;
     std::vector<RetiredSwapchain> _retired_swapchains;
     // Presenter doesn't own the physical device
     // these aren't real handles, so this is valid as long as the Presenter doesn't outlive the instance.

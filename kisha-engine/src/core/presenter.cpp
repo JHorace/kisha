@@ -11,6 +11,19 @@
 #include <spdlog/spdlog.h>
 
 namespace kisha::engine {
+  std::expected<Presenter, EngineError> Presenter::create(vk::raii::SurfaceKHR &&surface,
+                                                          vk::raii::PhysicalDevice physical_device,
+                                                          const std::uint32_t present_queue_family,
+                                                          const vk::raii::Device &device,
+                                                          const std::uint32_t frames_in_flight) {
+    Presenter presenter(std::move(surface), std::move(physical_device), present_queue_family);
+    if (std::expected<void, EngineError> semaphores = presenter.create_frame_semaphores(device, frames_in_flight);
+        !semaphores) {
+      return std::unexpected(semaphores.error());
+    }
+    return presenter;
+  }
+
   std::expected<SurfaceCapabilities, EngineError> Presenter::capabilities() const {
     return util::query_surface_capabilities(_physical_device, _surface);
   }
@@ -69,6 +82,21 @@ namespace kisha::engine {
     return {};
   }
 
+  std::expected<void, EngineError> Presenter::create_frame_semaphores(const vk::raii::Device &device,
+                                                                      const std::uint32_t frames_in_flight) {
+    _image_available_semaphores.clear();
+    _image_available_semaphores.reserve(frames_in_flight);
+    for (std::uint32_t frame = 0U; frame < frames_in_flight; ++frame) {
+      std::expected<vk::raii::Semaphore, vk::Result> semaphore = device.createSemaphore(vk::SemaphoreCreateInfo{});
+      if (!semaphore) {
+        spdlog::error("Failed to create image-available semaphore: {}", vk::to_string(semaphore.error()));
+        return std::unexpected(EngineError::FrameSyncCreationFailed);
+      }
+      _image_available_semaphores.push_back(std::move(*semaphore));
+    }
+    return {};
+  }
+
   /**
    *  This is where frames-in-flight versus swapchain images becomes relevant.
    *  The frame_index we pass in here is the application notion - The application has decided to allow recording NUM_FRAMES ahead of the current frame,
@@ -82,7 +110,13 @@ namespace kisha::engine {
       return std::unexpected(EngineError::ImageAcquisitionFailed);
     }
 
-    const vk::Semaphore image_available = _image_available_sempahors[frame_index];
+    if (frame_index >= _image_available_semaphores.size()) {
+      spdlog::error("Cannot acquire an image: frame slot {} has no image-available semaphore ({} allocated)",
+                    frame_index, _image_available_semaphores.size());
+      return std::unexpected(EngineError::ImageAcquisitionFailed);
+    }
+
+    const vk::Semaphore image_available = *_image_available_semaphores[frame_index];
 
     const vk::ResultValue<std::uint32_t> acquired =
         _swapchain->handle().acquireNextImage(std::numeric_limits<std::uint64_t>::max(), image_available);

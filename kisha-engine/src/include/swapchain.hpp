@@ -58,7 +58,6 @@ namespace kisha::engine {
     [[nodiscard]] const vk::raii::SwapchainKHR &handle() const { return _swapchain; }
     [[nodiscard]] const std::vector<vk::Image> &images() const { return _images; }
     [[nodiscard]] const std::vector<vk::raii::ImageView> &image_views() const { return _image_views; }
-    [[nodiscard]] std::vector<std::optional<vk::raii::Fence>> &image_in_flight_fences() { return _image_in_flight_fences; }
     [[nodiscard]] vk::Format format() const { return _format; }
     [[nodiscard]] vk::Extent2D extent() const { return _extent; }
     [[nodiscard]] vk::PresentModeKHR present_mode() const { return _present_mode; }
@@ -103,7 +102,6 @@ namespace kisha::engine {
     vk::PresentModeKHR _present_mode = vk::PresentModeKHR::eFifo;
     std::vector<vk::PresentModeKHR> _compatible_present_modes;
     std::vector<vk::raii::Semaphore> _render_finished;
-    std::vector<std::optional<vk::raii::Fence>> _image_in_flight_fences;
   };
 }
 

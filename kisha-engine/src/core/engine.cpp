@@ -271,8 +271,15 @@ namespace kisha::engine {
     }
 
     spdlog::info("Created presentation surface (presenting device '{}')", _profile.device_name);
-    _presenter.emplace(Presenter(std::move(surface), physical_device(),
-                                 _device_candidates[_active_candidate_index].queues.indices.present));
+    std::expected<Presenter, EngineError> presenter =
+        Presenter::create(std::move(surface), physical_device(),
+                          _device_candidates[_active_candidate_index].queues.indices.present, _device,
+                          FrameRing::FRAMES_IN_FLIGHT);
+    if (!presenter) {
+      return std::unexpected(presenter.error());
+    }
+
+    _presenter.emplace(std::move(*presenter));
     return &*_presenter;
   }
 }
