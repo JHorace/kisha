@@ -74,6 +74,14 @@ namespace kisha::engine {
     vk::AccessFlags2 access = vk::AccessFlagBits2::eNone;
   };
 
+  struct PassBarriers {
+    std::vector<vk::ImageMemoryBarrier2> image_barriers;
+
+    [[nodiscard]] vk::DependencyInfo dependency_info() const {
+      return vk::DependencyInfo{}.setImageMemoryBarriers(image_barriers);
+    }
+  };
+
   /**
    * @brief Tracks the last-known state of each registered image and emits the
    *        minimal synchronization2 barrier only when a declared access differs.
@@ -89,6 +97,7 @@ namespace kisha::engine {
     std::expected<std::optional<vk::ImageMemoryBarrier2>, EngineError>
         transition_to(ImageHandle handle, vk::ImageLayout layout, vk::PipelineStageFlags2 stage,
                        vk::AccessFlags2 access);
+    std::expected<PassBarriers, EngineError> barriers_for(const PassDescription &pass);
 
   private:
     struct TrackedImage {

@@ -112,3 +112,155 @@ TEST_CASE("FrameContext::raw() is reserved and returns NotImplemented", "[engine
   REQUIRE_FALSE(raw.has_value());
   REQUIRE(raw.error() == kisha::engine::EngineError::NotImplemented);
 }
+
+// --- Step 2: ResourceStateTracker diff + minimal synchronization2 barriers ---
+//
+// These remain headless ([core]): the tracker never touches a device, so we
+// register images with a null vk::Image and only assert on the diffed
+// layout/stage/access carried by the emitted vk::ImageMemoryBarrier2.
+
+namespace {
+  // A tracker holding one image registered at the default ImageState
+  // (eUndefined / eTopOfPipe / eNone), matching a freshly-acquired swapchain image.
+  kisha::engine::ResourceStateTracker make_tracker_with_image(const kisha::engine::ImageHandle handle) {
+    kisha::engine::ResourceStateTracker tracker;
+    tracker.register_image(handle, vk::Image{}, kisha::engine::ImageState{});
+    return tracker;
+  }
+}
+
+TEST_CASE("ResourceStateTracker emits a barrier when the requested access differs", "[engine][core]") {
+  const kisha::engine::ImageHandle handle{1U};
+  auto tracker = make_tracker_with_image(handle);
+
+  const std::optional<vk::ImageMemoryBarrier2> barrier = tracker.transition(
+      kisha::engine::ImageAccess{handle, vk::ImageLayout::eColorAttachmentOptimal,
+                                 vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+                                 vk::AccessFlagBits2::eColorAttachmentWrite});
+
+  REQUIRE(barrier.has_value());
+  // The barrier carries the diff from the last-known state to the requested one.
+  REQUIRE(barrier->oldLayout == vk::ImageLayout::eUndefined);
+  REQUIRE(barrier->newLayout == vk::ImageLayout::eColorAttachmentOptimal);
+  REQUIRE(barrier->srcStageMask == vk::PipelineStageFlagBits2::eTopOfPipe);
+  REQUIRE(barrier->srcAccessMask == vk::AccessFlagBits2::eNone);
+  REQUIRE(barrier->dstStageMask == vk::PipelineStageFlagBits2::eColorAttachmentOutput);
+  REQUIRE(barrier->dstAccessMask == vk::AccessFlagBits2::eColorAttachmentWrite);
+}
+
+TEST_CASE("ResourceStateTracker returns no barrier when the access is unchanged", "[engine][core]") {
+  const kisha::engine::ImageHandle handle{1U};
+  auto tracker = make_tracker_with_image(handle);
+
+  const kisha::engine::ImageAccess access{handle, vk::ImageLayout::eColorAttachmentOptimal,
+                                          vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+                                          vk::AccessFlagBits2::eColorAttachmentWrite};
+
+  REQUIRE(tracker.transition(access).has_value());       // first access transitions
+  REQUIRE_FALSE(tracker.transition(access).has_value()); // identical access is a redundant no-op
+}
+
+TEST_CASE("ResourceStateTracker emits a barrier for a stage/access-only change", "[engine][core]") {
+  const kisha::engine::ImageHandle handle{1U};
+  auto tracker = make_tracker_with_image(handle);
+
+  // Move into a known layout first.
+  REQUIRE(tracker.transition(kisha::engine::ImageAccess{handle, vk::ImageLayout::eGeneral,
+                                                        vk::PipelineStageFlagBits2::eComputeShader,
+                                                        vk::AccessFlagBits2::eShaderWrite})
+              .has_value());
+
+  // Same layout but a different stage/access still needs an execution/memory dependency.
+  const std::optional<vk::ImageMemoryBarrier2> barrier = tracker.transition(
+      kisha::engine::ImageAccess{handle, vk::ImageLayout::eGeneral, vk::PipelineStageFlagBits2::eFragmentShader,
+                                 vk::AccessFlagBits2::eShaderRead});
+
+  REQUIRE(barrier.has_value());
+  REQUIRE(barrier->oldLayout == vk::ImageLayout::eGeneral);
+  REQUIRE(barrier->newLayout == vk::ImageLayout::eGeneral);
+  REQUIRE(barrier->srcStageMask == vk::PipelineStageFlagBits2::eComputeShader);
+  REQUIRE(barrier->dstStageMask == vk::PipelineStageFlagBits2::eFragmentShader);
+}
+
+TEST_CASE("ResourceStateTracker::reset_image restarts from the given layout", "[engine][core]") {
+  const kisha::engine::ImageHandle handle{1U};
+  auto tracker = make_tracker_with_image(handle);
+
+  const kisha::engine::ImageAccess color{handle, vk::ImageLayout::eColorAttachmentOptimal,
+                                         vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+                                         vk::AccessFlagBits2::eColorAttachmentWrite};
+
+  REQUIRE(tracker.transition(color).has_value());       // first frame transitions
+  REQUIRE_FALSE(tracker.transition(color).has_value()); // unchanged within the frame
+
+  // Simulate the start of the next frame for a transient swapchain image.
+  tracker.reset_image(handle, vk::ImageLayout::eUndefined);
+
+  const std::optional<vk::ImageMemoryBarrier2> barrier = tracker.transition(color);
+  REQUIRE(barrier.has_value()); // the same access transitions again after the reset
+  REQUIRE(barrier->oldLayout == vk::ImageLayout::eUndefined);
+}
+
+TEST_CASE("ResourceStateTracker::transition_to reports unknown resources", "[engine][core]") {
+  kisha::engine::ResourceStateTracker tracker; // nothing registered
+
+  const std::expected<std::optional<vk::ImageMemoryBarrier2>, kisha::engine::EngineError> barrier =
+      tracker.transition_to(kisha::engine::ImageHandle{42U}, vk::ImageLayout::ePresentSrcKHR,
+                            vk::PipelineStageFlagBits2::eBottomOfPipe, vk::AccessFlagBits2::eNone);
+
+  REQUIRE_FALSE(barrier.has_value());
+  REQUIRE(barrier.error() == kisha::engine::EngineError::UnknownResource);
+}
+
+TEST_CASE("ResourceStateTracker::transition_to emits the implicit present transition", "[engine][core]") {
+  const kisha::engine::ImageHandle handle{1U};
+  auto tracker = make_tracker_with_image(handle);
+
+  // Put the image into the color-attachment state, then request the present hand-off.
+  REQUIRE(tracker.transition(kisha::engine::ImageAccess{handle, vk::ImageLayout::eColorAttachmentOptimal,
+                                                        vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+                                                        vk::AccessFlagBits2::eColorAttachmentWrite})
+              .has_value());
+
+  const std::expected<std::optional<vk::ImageMemoryBarrier2>, kisha::engine::EngineError> barrier =
+      tracker.transition_to(handle, vk::ImageLayout::ePresentSrcKHR, vk::PipelineStageFlagBits2::eBottomOfPipe,
+                            vk::AccessFlagBits2::eNone);
+
+  REQUIRE(barrier.has_value());
+  REQUIRE(barrier->has_value());
+  REQUIRE((*barrier)->oldLayout == vk::ImageLayout::eColorAttachmentOptimal);
+  REQUIRE((*barrier)->newLayout == vk::ImageLayout::ePresentSrcKHR);
+}
+
+TEST_CASE("ResourceStateTracker::barriers_for aggregates only changed accesses", "[engine][core]") {
+  const kisha::engine::ImageHandle handle{1U};
+  auto tracker = make_tracker_with_image(handle);
+
+  kisha::engine::PassDescription pass{};
+  pass.image_accesses.push_back(kisha::engine::ImageAccess{handle, vk::ImageLayout::eColorAttachmentOptimal,
+                                                           vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+                                                           vk::AccessFlagBits2::eColorAttachmentWrite});
+
+  const std::expected<kisha::engine::PassBarriers, kisha::engine::EngineError> barriers = tracker.barriers_for(pass);
+  REQUIRE(barriers.has_value());
+  REQUIRE(barriers->image_barriers.size() == 1U);
+
+  // Re-declaring the identical pass yields no barriers (state already satisfied).
+  const std::expected<kisha::engine::PassBarriers, kisha::engine::EngineError> repeat = tracker.barriers_for(pass);
+  REQUIRE(repeat.has_value());
+  REQUIRE(repeat->image_barriers.empty());
+}
+
+TEST_CASE("ResourceStateTracker::barriers_for surfaces unknown resources", "[engine][core]") {
+  const kisha::engine::ImageHandle known{1U};
+  auto tracker = make_tracker_with_image(known);
+
+  kisha::engine::PassDescription pass{};
+  pass.image_accesses.push_back(kisha::engine::ImageAccess{
+      kisha::engine::ImageHandle{99U}, vk::ImageLayout::eColorAttachmentOptimal,
+      vk::PipelineStageFlagBits2::eColorAttachmentOutput, vk::AccessFlagBits2::eColorAttachmentWrite});
+
+  const std::expected<kisha::engine::PassBarriers, kisha::engine::EngineError> barriers = tracker.barriers_for(pass);
+  REQUIRE_FALSE(barriers.has_value());
+  REQUIRE(barriers.error() == kisha::engine::EngineError::UnknownResource);
+}

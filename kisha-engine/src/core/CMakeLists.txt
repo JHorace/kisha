@@ -6,5 +6,6 @@ target_sources(
         errors.cpp
         frame_ring.cpp
         presenter.cpp
+        rendering.cpp
         swapchain.cpp
 )
