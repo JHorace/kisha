@@ -53,7 +53,9 @@ namespace kisha::engine {
           if (_swapchain.has_value()) {
             _retired_swapchains.push_back(RetiredSwapchain{
                 .swapchain = std::move(*_swapchain),
+                .present_fences = std::move(_present_fences),
             });
+            _present_fences.clear();
           }
           _swapchain = std::move(swapchain);
           _active_config = config;
@@ -147,6 +149,13 @@ namespace kisha::engine {
       return std::unexpected(EngineError::PresentFailed);
     }
 
+    // Reap present fences of earlier presents that have completed so the active
+    // swapchain's fence list stays bounded.
+    std::erase_if(_present_fences, [&device](const vk::raii::Fence &present_fence) {
+      const vk::Fence handle = *present_fence;
+      return device.waitForFences(handle, VK_TRUE, 0U) == vk::Result::eSuccess;
+    });
+
     std::expected<vk::raii::Fence, vk::Result> fence = device.createFence(vk::FenceCreateInfo{});
     if (!fence) {
       spdlog::error("Failed to create present fence: {}", vk::to_string(fence.error()));
@@ -172,6 +181,11 @@ namespace kisha::engine {
       spdlog::error("Failed to present swapchain image: {}", vk::to_string(result));
       return std::unexpected(EngineError::PresentFailed);
     }
+
+    // The present was submitted, so the fence references the active swapchain
+    // until it signals. Retain it (it must outlive this call) so it can be moved
+    // to the RetiredSwapchain if the swapchain is replaced below.
+    _present_fences.push_back(std::move(*fence));
 
     if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR) {
       spdlog::info("Swapchain {} on present; recreating", vk::to_string(result));

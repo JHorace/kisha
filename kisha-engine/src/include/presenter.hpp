@@ -139,6 +139,7 @@ namespace kisha::engine {
     std::optional<Swapchain> _swapchain;
     SwapchainConfig _active_config;
     std::vector<vk::raii::Semaphore> _image_available_semaphores;
+    std::vector<vk::raii::Fence> _present_fences;
     std::vector<RetiredSwapchain> _retired_swapchains;
     // Presenter doesn't own the physical device
     // these aren't real handles, so this is valid as long as the Presenter doesn't outlive the instance.
