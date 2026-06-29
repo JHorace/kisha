@@ -1,0 +1,3 @@
+# Windowed triangle sample executable.
+#
+
