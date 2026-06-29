@@ -282,4 +282,45 @@ namespace kisha::engine {
     _presenter.emplace(std::move(*presenter));
     return &*_presenter;
   }
+
+  namespace {
+    // TODO: we'll want to reflect these (probably at build time?)
+    constexpr const char *kShaderEntryPoint = "main";
+  }
+
+  std::expected<ShaderProgramHandle, EngineError>
+  EngineCore::create_shader_program(const ShaderProgramDescription &description) {
+    if (description.vertex_spirv.empty() || description.fragment_spirv.empty()) {
+      spdlog::error("Cannot create a shader program from empty SPIR-V");
+      return std::unexpected(EngineError::ShaderObjectCreationFailed);
+    }
+
+    const std::array<vk::ShaderCreateInfoEXT, 2U> shader_infos{
+        vk::ShaderCreateInfoEXT{}
+            .setFlags(vk::ShaderCreateFlagBitsEXT::eLinkStage)
+            .setStage(vk::ShaderStageFlagBits::eVertex)
+            .setNextStage(vk::ShaderStageFlagBits::eFragment)
+            .setCodeType(vk::ShaderCodeTypeEXT::eSpirv)
+            .setCodeSize(description.vertex_spirv.size_bytes())
+            .setPCode(description.vertex_spirv.data())
+            .setPName(kShaderEntryPoint),
+        vk::ShaderCreateInfoEXT{}
+            .setFlags(vk::ShaderCreateFlagBitsEXT::eLinkStage)
+            .setStage(vk::ShaderStageFlagBits::eFragment)
+            .setCodeType(vk::ShaderCodeTypeEXT::eSpirv)
+            .setCodeSize(description.fragment_spirv.size_bytes())
+            .setPCode(description.fragment_spirv.data())
+            .setPName(kShaderEntryPoint),
+    };
+
+    std::expected<std::vector<vk::raii::ShaderEXT>, vk::Result> shaders =
+        _device.createShadersEXT(shader_infos);
+    if (!shaders) {
+      spdlog::error("Failed to create shader objects: {}", vk::to_string(shaders.error()));
+      return std::unexpected(EngineError::ShaderObjectCreationFailed);
+    }
+
+    _shader_programs.push_back(ShaderProgram{std::move(*shaders)});
+    return ShaderProgramHandle{static_cast<std::uint32_t>(_shader_programs.size())};
+  }
 }

@@ -14,7 +14,7 @@
 #include "frame_ring.hpp"
 
 namespace kisha::engine {
-  struct PipelineHandle {
+  struct ShaderProgramHandle {
     std::uint32_t id = 0U; // 0 reserved as 'invalid'
   };
 
@@ -22,11 +22,9 @@ namespace kisha::engine {
     std::uint32_t id = 0U; // 0 reserved as 'invalid'
   };
 
-  struct GraphicsPipelineDescription {
+  struct ShaderProgramDescription {
     std::span<const std::uint32_t> vertex_spirv;
     std::span<const std::uint32_t> fragment_spirv;
-    vk::Format color_format = vk::Format::eUndefined; // swapchain format
-    vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList;
   };
 
   /**
@@ -45,10 +43,10 @@ namespace kisha::engine {
   };
 
   /**
-   * @brief A single draw referencing a pipeline and a vertex count.
+   * @brief A single draw referencing a shader program and a vertex count.
    */
   struct DrawItem {
-    PipelineHandle pipeline;
+    ShaderProgramHandle program;
     std::uint32_t vertex_count = 3U;
   };
 

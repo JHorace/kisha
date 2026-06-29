@@ -13,6 +13,7 @@
 #include "errors.hpp"
 #include "presenter.hpp"
 #include "frame_ring.hpp"
+#include "rendering.hpp"
 
 namespace kisha::engine {
   /**
@@ -127,9 +128,16 @@ namespace kisha::engine {
     [[nodiscard]] Presenter *presenter() { return _presenter ? &*_presenter : nullptr; }
     [[nodiscard]] const Presenter *presenter() const { return _presenter ? &*_presenter : nullptr; }
 
+    [[nodiscard]] std::expected<ShaderProgramHandle, EngineError>
+        create_shader_program(const ShaderProgramDescription &description);
+
     void begin_frame();
   private:
     friend class EngineInstance;
+
+    struct ShaderProgram {
+      std::vector<vk::raii::ShaderEXT> shaders;
+    };
 
     std::expected<void, EngineError> reselect_device_for_surface(const vk::raii::SurfaceKHR &surface);
 
@@ -148,6 +156,7 @@ namespace kisha::engine {
     Queues _queues{};
     EngineProfile _profile;
     std::optional<Presenter> _presenter;
+    std::vector<ShaderProgram> _shader_programs;
   };
 
   /**
