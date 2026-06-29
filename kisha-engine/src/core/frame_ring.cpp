@@ -3,6 +3,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <array>
 
 #include "presenter.hpp"
 
@@ -71,8 +72,12 @@ namespace kisha::engine {
       std::vector<vk::raii::CommandPool> per_family_pools;
       per_family_pools.reserve(distinct_families.size());
       for (const std::uint32_t queue_family : distinct_families) {
+        // eResetCommandBuffer lets each frame's command buffer be implicitly reset by begin() when
+        // its slot is reused (begin_frame has already waited on the timeline, so the previous
+        // submission has completed and the buffer is no longer pending).
         vk::CommandPoolCreateInfo command_pool_create_info{
-            vk::CommandPoolCreateFlagBits::eTransient, queue_family};
+            vk::CommandPoolCreateFlagBits::eTransient | vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
+            queue_family};
         std::expected<vk::raii::CommandPool, vk::Result> command_pool =
             device.createCommandPool(command_pool_create_info);
         if (!command_pool) {
@@ -136,11 +141,59 @@ namespace kisha::engine {
     return &_frames[slot];
   }
 
+  std::expected<void, EngineError> FrameRing::submit_frame(const vk::raii::Queue &graphics_queue,
+                                                           FrameRecorder &recorder,
+                                                           const vk::Semaphore wait_image_available,
+                                                           const vk::Semaphore signal_render_finished) {
+    const std::uint64_t signal_value = ++_submit_index;
+
+    // The acquired image is ready once the image-available semaphore signals; the first stage that
+    // touches it is color-attachment output, so that's all we need to wait for.
+    const vk::SemaphoreSubmitInfo wait_info = vk::SemaphoreSubmitInfo{}
+        .setSemaphore(wait_image_available)
+        .setStageMask(vk::PipelineStageFlagBits2::eColorAttachmentOutput);
+
+    const std::array<vk::SemaphoreSubmitInfo, 2U> signal_infos{
+        // Binary, consumed by Presenter::present. Signal at eAllCommands so the implicit
+        // present-layout transition recorded at the end of the frame has completed first.
+        vk::SemaphoreSubmitInfo{}
+            .setSemaphore(signal_render_finished)
+            .setStageMask(vk::PipelineStageFlagBits2::eAllCommands),
+        // Timeline, waited on by a future begin_frame before this slot is reused.
+        vk::SemaphoreSubmitInfo{}
+            .setSemaphore(*_frame_timeline)
+            .setValue(signal_value)
+            .setStageMask(vk::PipelineStageFlagBits2::eAllCommands),
+    };
+
+    const vk::CommandBufferSubmitInfo command_buffer_info =
+        vk::CommandBufferSubmitInfo{}.setCommandBuffer(*recorder.graphics_command_buffer);
+
+    const vk::SubmitInfo2 submit_info = vk::SubmitInfo2{}
+        .setWaitSemaphoreInfos(wait_info)
+        .setCommandBufferInfos(command_buffer_info)
+        .setSignalSemaphoreInfos(signal_infos);
+
+    if (std::expected<void, vk::Result> submitted = graphics_queue.submit2(submit_info); !submitted) {
+      spdlog::error("Failed to submit graphics command buffer: {}", vk::to_string(submitted.error()));
+      return std::unexpected(EngineError::SubmitFailed);
+    }
+
+    // This slot's next reuse must wait until this submission's timeline value is signaled, and the
+    // next frame advances to the following slot.
+    _frame_slot[recorder.frame_slot] = signal_value;
+    ++_frame_counter;
+    return {};
+  }
+
   FrameRing::FrameRing(vk::raii::Semaphore &&frame_timeline,
                        std::vector<std::vector<vk::raii::CommandPool>> &&command_pools,
                        std::vector<FrameRecorder> &&frames)
       : _frame_timeline(std::move(frame_timeline)),
         _command_pools(std::move(command_pools)),
         _frames(std::move(frames)) {
+    // One stored timeline value per slot, all starting at 0 to match the timeline's initial value
+    // (so the first reuse of each slot waits on a value that is already signaled).
+    _frame_slot.assign(_frames.size(), 0U);
   }
 }

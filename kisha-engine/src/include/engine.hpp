@@ -132,6 +132,7 @@ namespace kisha::engine {
         create_shader_program(const ShaderProgramDescription &description);
 
     [[nodiscard]] std::expected<FrameContext, EngineError> begin_frame();
+    [[nodiscard]] std::expected<void, EngineError> end_frame(FrameContext &&frame);
   private:
     friend class EngineInstance;
 
@@ -140,6 +141,10 @@ namespace kisha::engine {
     };
 
     std::expected<void, EngineError> reselect_device_for_surface(const vk::raii::SurfaceKHR &surface);
+
+    std::expected<void, EngineError> bind_shader_program(const vk::raii::CommandBuffer &command_buffer,
+                                                         ShaderProgramHandle program,
+                                                         vk::Extent2D extent) const;
 
     EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance, vk::raii::DebugUtilsMessengerEXT &&debug_messenger,
                vk::raii::PhysicalDevices &&physical_devices, std::vector<DeviceSelection> &&device_candidates,

@@ -43,6 +43,11 @@ namespace kisha::engine {
 
     [[nodiscard]] std::expected<FrameRecorder *, EngineError> begin_frame(const vk::raii::Device& device);
 
+    [[nodiscard]] std::expected<void, EngineError> submit_frame(const vk::raii::Queue &graphics_queue,
+                                                                FrameRecorder &recorder,
+                                                                vk::Semaphore wait_image_available,
+                                                                vk::Semaphore signal_render_finished);
+
   private:
     FrameRing(vk::raii::Semaphore&& frame_timeline,
               std::vector<std::vector<vk::raii::CommandPool>>&& command_pools,
@@ -54,10 +59,13 @@ namespace kisha::engine {
     std::vector<std::vector<vk::raii::CommandPool>> _command_pools = {};
     // Per-frame-slot resources (command buffers) allocated up front from _command_pools.
     std::vector<FrameRecorder> _frames = {};
+    // Per-slot timeline value that the slot's last submission signals; begin_frame waits on it
+    // before reusing the slot. Sized to the number of frames-in-flight.
     std::vector<uint64_t> _frame_slot = {};
-    std::vector<uint64_t> _submit_index = {};
+    // counter of submitted frames; also the next timeline value to signal.
+    uint64_t _submit_index = 0U;
+    // counter of frames begun; selects the active slot (mod frames-in-flight).
     uint64_t _frame_counter = 0U;
-    uint64_t _next_frame_index = 0U;
   };
 }
 

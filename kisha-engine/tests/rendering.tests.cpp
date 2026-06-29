@@ -334,3 +334,21 @@ TEST_CASE("EngineCore::create_shader_program rejects empty SPIR-V", "[engine][gp
   REQUIRE_FALSE(handle.has_value());
   REQUIRE(handle.error() == kisha::engine::EngineError::ShaderObjectCreationFailed);
 }
+
+// --- Step 5: begin_frame / end_frame lifecycle ([gpu]) ---
+//
+// The full record/submit/present loop needs a real window surface + swapchain, which the headless
+// test environment cannot provide. What we *can* verify with just a device is that begin_frame no
+// longer swallows acquisition errors: without a presenter/swapchain it must surface an error via
+// std::expected rather than returning an unbound FrameContext (the old empty error branch).
+
+TEST_CASE("EngineCore::begin_frame fails when there is no presenter or swapchain", "[engine][gpu]") {
+  std::expected<kisha::engine::EngineCore, kisha::engine::EngineError> core = kisha::engine::EngineCore::create();
+  REQUIRE(core.has_value());
+
+  // No presenter has been created, so there is nothing to acquire from.
+  const std::expected<kisha::engine::FrameContext, kisha::engine::EngineError> frame = core->begin_frame();
+
+  REQUIRE_FALSE(frame.has_value());
+  REQUIRE(frame.error() == kisha::engine::EngineError::ImageAcquisitionFailed);
+}

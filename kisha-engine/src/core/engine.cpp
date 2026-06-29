@@ -244,6 +244,134 @@ namespace kisha::engine {
     return FrameContext{acquired->image_index, acquired->image_available, *recorder, kSwapchainImageHandle};
   }
 
+  std::expected<void, EngineError>
+  EngineCore::bind_shader_program(const vk::raii::CommandBuffer &command_buffer, const ShaderProgramHandle program,
+                                  const vk::Extent2D extent) const {
+    if (program.id == 0U || program.id > _shader_programs.size()) {
+      spdlog::error("Draw references an unknown shader program (id {})", program.id);
+      return std::unexpected(EngineError::UnknownResource);
+    }
+    const ShaderProgram &shader_program = _shader_programs[program.id - 1U];
+
+    const std::array<vk::ShaderStageFlagBits, 2U> stages{vk::ShaderStageFlagBits::eVertex,
+                                                         vk::ShaderStageFlagBits::eFragment};
+    const std::array<vk::ShaderEXT, 2U> shaders{*shader_program.shaders[0], *shader_program.shaders[1]};
+    command_buffer.bindShadersEXT(stages, shaders);
+
+    command_buffer.setViewportWithCount(vk::Viewport{0.F, 0.F, static_cast<float>(extent.width),
+                                                     static_cast<float>(extent.height), 0.F, 1.F});
+    command_buffer.setScissorWithCount(vk::Rect2D{{0, 0}, extent});
+    command_buffer.setRasterizerDiscardEnable(VK_FALSE);
+    command_buffer.setPrimitiveTopology(vk::PrimitiveTopology::eTriangleList);
+    command_buffer.setPrimitiveRestartEnable(VK_FALSE);
+    command_buffer.setVertexInputEXT({}, {}); // attributeless: no bindings, no attributes
+    command_buffer.setCullMode(vk::CullModeFlagBits::eNone);
+    command_buffer.setFrontFace(vk::FrontFace::eCounterClockwise);
+    command_buffer.setDepthTestEnable(VK_FALSE);
+    command_buffer.setDepthWriteEnable(VK_FALSE);
+    command_buffer.setDepthCompareOp(vk::CompareOp::eAlways);
+    command_buffer.setDepthBiasEnable(VK_FALSE);
+    command_buffer.setDepthBoundsTestEnable(VK_FALSE);
+    command_buffer.setStencilTestEnable(VK_FALSE);
+    command_buffer.setDepthClampEnableEXT(VK_FALSE);
+    command_buffer.setPolygonModeEXT(vk::PolygonMode::eFill);
+    command_buffer.setRasterizationSamplesEXT(vk::SampleCountFlagBits::e1);
+    const vk::SampleMask sample_mask = 0xFFFFFFFFU;
+    command_buffer.setSampleMaskEXT(vk::SampleCountFlagBits::e1, sample_mask);
+    command_buffer.setAlphaToCoverageEnableEXT(VK_FALSE);
+    command_buffer.setLogicOpEnableEXT(VK_FALSE);
+    const vk::Bool32 color_blend_enable = VK_FALSE;
+    command_buffer.setColorBlendEnableEXT(0U, color_blend_enable);
+    const vk::ColorComponentFlags color_write_mask = vk::ColorComponentFlagBits::eR |
+                                                     vk::ColorComponentFlagBits::eG |
+                                                     vk::ColorComponentFlagBits::eB |
+                                                     vk::ColorComponentFlagBits::eA;
+    command_buffer.setColorWriteMaskEXT(0U, color_write_mask);
+    return {};
+  }
+
+  std::expected<void, EngineError> EngineCore::end_frame(FrameContext &&frame) {
+    if (!_presenter || !_presenter->has_swapchain()) {
+      spdlog::error("Cannot end a frame without a presenter and swapchain");
+      return std::unexpected(EngineError::PresentFailed);
+    }
+    FrameRecorder *recorder = frame.recorder();
+    if (recorder == nullptr) {
+      spdlog::error("Cannot end a frame that has no active recorder");
+      return std::unexpected(EngineError::CommandRecordingFailed);
+    }
+
+    const vk::raii::CommandBuffer &command_buffer = recorder->graphics_command_buffer;
+    const Swapchain &swapchain = _presenter->swapchain();
+    const std::uint32_t image_index = frame.image_index();
+    const vk::Extent2D extent = swapchain.extent();
+    const vk::ImageView color_view = *swapchain.image_views()[image_index];
+
+    if (std::expected<void, vk::Result> begun = command_buffer.begin(
+            vk::CommandBufferBeginInfo{}.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
+        !begun) {
+      spdlog::error("Failed to begin command buffer: {}", vk::to_string(begun.error()));
+      return std::unexpected(EngineError::CommandRecordingFailed);
+    }
+
+    for (const PassDescription &pass : frame.description().passes) {
+      std::expected<PassBarriers, EngineError> barriers = _state_tracker.barriers_for(pass);
+      if (!barriers) {
+        return std::unexpected(barriers.error());
+      }
+      if (!barriers->image_barriers.empty()) {
+        command_buffer.pipelineBarrier2(barriers->dependency_info());
+      }
+
+      const vk::ClearValue clear_value{vk::ClearColorValue{pass.color.clear_color}};
+      const vk::RenderingAttachmentInfo color_attachment = vk::RenderingAttachmentInfo{}
+          .setImageView(color_view)
+          .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
+          .setLoadOp(vk::AttachmentLoadOp::eClear)
+          .setStoreOp(vk::AttachmentStoreOp::eStore)
+          .setClearValue(clear_value);
+      const vk::RenderingInfo rendering_info = vk::RenderingInfo{}
+          .setRenderArea(vk::Rect2D{{0, 0}, extent})
+          .setLayerCount(1U)
+          .setColorAttachments(color_attachment);
+
+      command_buffer.beginRendering(rendering_info);
+      for (const DrawItem &draw : pass.draws) {
+        if (std::expected<void, EngineError> bound = bind_shader_program(command_buffer, draw.program, extent);
+            !bound) {
+          command_buffer.endRendering();
+          return std::unexpected(bound.error());
+        }
+        command_buffer.draw(draw.vertex_count, 1U, 0U, 0U);
+      }
+      command_buffer.endRendering();
+    }
+
+    std::expected<std::optional<vk::ImageMemoryBarrier2>, EngineError> present_barrier =
+        _state_tracker.transition_to(frame.swapchain_image(), vk::ImageLayout::ePresentSrcKHR,
+                                     vk::PipelineStageFlagBits2::eBottomOfPipe, vk::AccessFlagBits2::eNone);
+    if (!present_barrier) {
+      return std::unexpected(present_barrier.error());
+    }
+    if (present_barrier->has_value()) {
+      command_buffer.pipelineBarrier2(vk::DependencyInfo{}.setImageMemoryBarriers(**present_barrier));
+    }
+
+    if (std::expected<void, vk::Result> ended = command_buffer.end(); !ended) {
+      spdlog::error("Failed to end command buffer: {}", vk::to_string(ended.error()));
+      return std::unexpected(EngineError::CommandRecordingFailed);
+    }
+
+    if (std::expected<void, EngineError> submitted =
+            _frame_ring.submit_frame(_queues.graphics, *recorder, frame.image_available(),
+                                     *swapchain.render_finished(image_index));
+        !submitted) {
+      return std::unexpected(submitted.error());
+    }
+
+    return _presenter->present(_device, _queues.graphics, image_index).transform([](vk::Result) {});
+  }
+
   std::expected<void, EngineError> EngineCore::reselect_device_for_surface(const vk::raii::SurfaceKHR &surface) {
     for (std::size_t index = 0U; index < _device_candidates.size(); ++index) {
       if (index == _active_candidate_index) {
