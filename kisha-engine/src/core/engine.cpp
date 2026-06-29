@@ -209,14 +209,39 @@ namespace kisha::engine {
         });
   }
 
-  void EngineCore::begin_frame() {
-    auto maybe_frame = _frame_ring.begin_frame(_device);
+  namespace {
+    constexpr ImageHandle kSwapchainImageHandle{1U};
+  }
 
-    if (!maybe_frame) {
-
+  std::expected<FrameContext, EngineError> EngineCore::begin_frame() {
+    if (!_presenter || !_presenter->has_swapchain()) {
+      spdlog::error("Cannot begin a frame without a presenter and swapchain");
+      return std::unexpected(EngineError::ImageAcquisitionFailed);
     }
 
-    (void)_presenter.value().acquire_next_image(_device, maybe_frame.value()->frame_slot);
+    std::expected<FrameRecorder *, EngineError> recorder = _frame_ring.begin_frame(_device);
+    if (!recorder) {
+      return std::unexpected(recorder.error());
+    }
+
+    std::expected<AcquiredFrame, EngineError> acquired =
+        _presenter->acquire_next_image(_device, (*recorder)->frame_slot);
+    if (!acquired) {
+      return std::unexpected(acquired.error());
+    }
+
+    if (acquired->result == vk::Result::eErrorOutOfDateKHR) {
+      spdlog::info("Swapchain was out of date; skipping frame and retrying next iteration");
+      return std::unexpected(EngineError::ImageAcquisitionFailed);
+    }
+
+    _state_tracker.register_image(kSwapchainImageHandle,
+                                  _presenter->swapchain_images()[acquired->image_index],
+                                  ImageState{vk::ImageLayout::eUndefined,
+                                             vk::PipelineStageFlagBits2::eTopOfPipe,
+                                             vk::AccessFlagBits2::eNone});
+
+    return FrameContext{acquired->image_index, acquired->image_available, *recorder, kSwapchainImageHandle};
   }
 
   std::expected<void, EngineError> EngineCore::reselect_device_for_surface(const vk::raii::SurfaceKHR &surface) {

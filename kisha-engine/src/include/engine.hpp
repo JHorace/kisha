@@ -131,7 +131,7 @@ namespace kisha::engine {
     [[nodiscard]] std::expected<ShaderProgramHandle, EngineError>
         create_shader_program(const ShaderProgramDescription &description);
 
-    void begin_frame();
+    [[nodiscard]] std::expected<FrameContext, EngineError> begin_frame();
   private:
     friend class EngineInstance;
 
@@ -157,6 +157,7 @@ namespace kisha::engine {
     EngineProfile _profile;
     std::optional<Presenter> _presenter;
     std::vector<ShaderProgram> _shader_programs;
+    ResourceStateTracker _state_tracker;
   };
 
   /**
