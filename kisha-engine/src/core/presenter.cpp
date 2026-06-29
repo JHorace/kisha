@@ -156,6 +156,8 @@ namespace kisha::engine {
       return device.waitForFences(handle, VK_TRUE, 0U) == vk::Result::eSuccess;
     });
 
+    prune_retired_swapchains(device);
+
     std::expected<vk::raii::Fence, vk::Result> fence = device.createFence(vk::FenceCreateInfo{});
     if (!fence) {
       spdlog::error("Failed to create present fence: {}", vk::to_string(fence.error()));

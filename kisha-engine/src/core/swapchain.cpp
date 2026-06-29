@@ -113,8 +113,8 @@ namespace kisha::engine {
     }
 
     std::vector<vk::raii::Semaphore> render_finished;
-    render_finished.reserve(image_count);
-    for (std::uint32_t image = 0U; image < image_count; ++image) {
+    render_finished.reserve(images->size());
+    for (std::size_t image = 0U; image < images->size(); ++image) {
       std::expected<vk::raii::Semaphore, vk::Result> semaphore = device.createSemaphore(vk::SemaphoreCreateInfo{});
       if (!semaphore) {
         spdlog::error("Failed to create render-finished semaphore: {}", vk::to_string(semaphore.error()));
