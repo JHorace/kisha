@@ -160,18 +160,18 @@ namespace kisha::engine::util {
     return {};
   }
 
-  std::expected<vk::raii::Instance, EngineInitError> create_instance(const vk::raii::Context &context,
+  std::expected<vk::raii::Instance, EngineError> create_instance(const vk::raii::Context &context,
                                                                      const vk::ApplicationInfo &application_info,
                                                                      const std::vector<std::string> &required_layers,
                                                                      const std::vector<std::string> &required_extensions) {
     if (auto r = validate_required_names(enumerate_instance_layer_names(context), required_layers); !r) {
       spdlog::error("Missing required Vulkan instance layers: {}", r.error().missing_names);
-      return std::unexpected(EngineInitError::MissingRequiredLayers);
+      return std::unexpected(EngineError::MissingRequiredLayers);
     }
 
     if (auto r = validate_required_names(enumerate_instance_extension_names(context), required_extensions); !r) {
       spdlog::error("Missing required Vulkan instance extensions: {}", r.error().missing_names);
-      return std::unexpected(EngineInitError::MissingRequiredExtensions);
+      return std::unexpected(EngineError::MissingRequiredExtensions);
     }
 
     const std::vector<const char *> instance_layer_ptrs = to_c_string_ptrs(required_layers);
@@ -187,11 +187,11 @@ namespace kisha::engine::util {
     return context.createInstance(instance_create_info)
         .transform_error([](const vk::Result result) {
           spdlog::error("Failed to create Vulkan instance: {}", vk::to_string(result));
-          return EngineInitError::InstanceCreationFailed;
+          return EngineError::InstanceCreationFailed;
         });
   }
 
-std::expected<QueueSelection, EngineInitError> select_queue_families(const vk::raii::PhysicalDevice &physical_device) {
+std::expected<QueueSelection, EngineError> select_queue_families(const vk::raii::PhysicalDevice &physical_device) {
   const std::vector<vk::QueueFamilyProperties> queue_properties = physical_device.getQueueFamilyProperties();
 
   std::optional<std::uint32_t> graphics_family;
@@ -231,7 +231,7 @@ std::expected<QueueSelection, EngineInitError> select_queue_families(const vk::r
   }
 
   if (!graphics_family.has_value()) {
-    return std::unexpected(EngineInitError::NoSuitableQueueFamily);
+    return std::unexpected(EngineError::NoSuitableQueueFamily);
   }
 
   const std::optional<std::uint32_t> async_compute_family =
@@ -304,7 +304,7 @@ std::expected<std::vector<DeviceSelection>, NoSuitableDeviceError> rank_physical
       continue;
     }
 
-    const std::expected<QueueSelection, EngineInitError> queues = select_queue_families(physical_device);
+    const std::expected<QueueSelection, EngineError> queues = select_queue_families(physical_device);
     if (!queues) {
       spdlog::debug("Skipping device '{}': no suitable queue families", rejection.device_name);
       rejection.no_suitable_queue_family = true;
@@ -437,7 +437,7 @@ std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(con
     return queue_create_infos;
   }
 
-  std::expected<vk::raii::Device, EngineInitError> create_logical_device(const vk::raii::PhysicalDevice &physical_device,
+  std::expected<vk::raii::Device, EngineError> create_logical_device(const vk::raii::PhysicalDevice &physical_device,
                                                                          const QueueSelection &queues,
                                                                          const std::vector<std::string> &enabled_extensions) {
     const std::vector<vk::DeviceQueueCreateInfo> queue_create_infos = build_queue_create_infos(queues);
@@ -465,7 +465,7 @@ std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(con
     return physical_device.createDevice(chain.get<vk::DeviceCreateInfo>())
         .transform_error([](const vk::Result result) {
           spdlog::error("Failed to create logical device: {}", vk::to_string(result));
-          return EngineInitError::DeviceCreationFailed;
+          return EngineError::DeviceCreationFailed;
         });
   }
 
@@ -481,19 +481,19 @@ std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(con
     return result;
   }
 
-  std::expected<vk::raii::SurfaceKHR, EngineInitError> create_surface(const vk::raii::Instance &instance,
+  std::expected<vk::raii::SurfaceKHR, EngineError> create_surface(const vk::raii::Instance &instance,
                                                                       const NativeWindowHandle &window_handle) {
     const auto map_error = [](const vk::Result result) {
       spdlog::error("Failed to create surface: {}", vk::to_string(result));
-      return EngineInitError::SurfaceCreationFailed;
+      return EngineError::SurfaceCreationFailed;
     };
 
     return std::visit(
-        [&](const auto &handle) -> std::expected<vk::raii::SurfaceKHR, EngineInitError> {
+        [&](const auto &handle) -> std::expected<vk::raii::SurfaceKHR, EngineError> {
           using Handle = std::decay_t<decltype(handle)>;
           if constexpr (std::is_same_v<Handle, std::monostate>) {
             spdlog::error("Cannot create a surface from an empty (headless) native window handle");
-            return std::unexpected(EngineInitError::SurfaceCreationFailed);
+            return std::unexpected(EngineError::SurfaceCreationFailed);
           }
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
           else if constexpr (std::is_same_v<Handle, WaylandWindowHandle>) {
@@ -527,17 +527,17 @@ std::expected<DeviceSelection, NoSuitableDeviceError> select_physical_device(con
           }
 #endif
           else {
-            return std::unexpected(EngineInitError::SurfaceCreationFailed);
+            return std::unexpected(EngineError::SurfaceCreationFailed);
           }
         },
         window_handle);
   }
 
-  std::expected<SurfaceCapabilities, EngineInitError> query_surface_capabilities(const vk::raii::PhysicalDevice &physical_device,
+  std::expected<SurfaceCapabilities, EngineError> query_surface_capabilities(const vk::raii::PhysicalDevice &physical_device,
                                                                                  const vk::raii::SurfaceKHR &surface) {
     const auto map_error = [](const vk::Result result, const std::string_view what) {
       spdlog::error("Failed to query surface {}: {}", what, vk::to_string(result));
-      return EngineInitError::SurfaceCapabilityQueryFailed;
+      return EngineError::SurfaceCapabilityQueryFailed;
     };
 
     const vk::PhysicalDeviceSurfaceInfo2KHR surface_info = vk::PhysicalDeviceSurfaceInfo2KHR{}.setSurface(*surface);

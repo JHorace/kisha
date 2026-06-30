@@ -22,23 +22,23 @@ TEST_CASE("Engine baseline raises an app api version below 1.3", "[engine][core]
   kisha::engine::EngineCreateInfo create_info{};
   create_info.instance_spec.min_api_version = VK_API_VERSION_1_2;
 
-  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> result =
+  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineError> result =
     kisha::engine::EngineCore::create(create_info);
 
   // Initialization must never fail because of the API version: on a capable GPU it
   // succeeds outright, and otherwise it fails for some other (environment) reason.
-  REQUIRE((result.has_value() || result.error() != kisha::engine::EngineInitError::ApiVersionTooLow));
+  REQUIRE((result.has_value() || result.error() != kisha::engine::EngineError::ApiVersionTooLow));
 }
 
 TEST_CASE("Engine init creates a logical device with default requirements", "[engine][core][gpu]") {
-  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> result =
+  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineError> result =
     kisha::engine::EngineCore::create();
 
   REQUIRE(result.has_value());
 }
 
 TEST_CASE("EngineInstance init enumerates at least one ranked device candidate", "[engine][core][gpu]") {
-  const std::expected<kisha::engine::EngineInstance, kisha::engine::EngineInitError> result =
+  const std::expected<kisha::engine::EngineInstance, kisha::engine::EngineError> result =
     kisha::engine::EngineInstance::create();
 
   REQUIRE(result.has_value());
@@ -48,7 +48,7 @@ TEST_CASE("EngineInstance init enumerates at least one ranked device candidate",
 TEST_CASE("EngineInstance only ranks discrete GPUs under the default spec", "[engine][core][gpu]") {
   // The engine device baseline requires a discrete GPU, so every ranked
   // candidate must be a discrete GPU and indices must stay in range.
-  const std::expected<kisha::engine::EngineInstance, kisha::engine::EngineInitError> result =
+  const std::expected<kisha::engine::EngineInstance, kisha::engine::EngineError> result =
     kisha::engine::EngineInstance::create();
 
   REQUIRE(result.has_value());
@@ -62,11 +62,11 @@ TEST_CASE("EngineInstance only ranks discrete GPUs under the default spec", "[en
 }
 
 TEST_CASE("EngineCore is produced from EngineInstance with an active candidate", "[engine][core][gpu]") {
-  std::expected<kisha::engine::EngineInstance, kisha::engine::EngineInitError> instance =
+  std::expected<kisha::engine::EngineInstance, kisha::engine::EngineError> instance =
     kisha::engine::EngineInstance::create();
   REQUIRE(instance.has_value());
 
-  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> core =
+  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineError> core =
     std::move(*instance).create_engine_core();
 
   REQUIRE(core.has_value());
@@ -78,7 +78,7 @@ TEST_CASE("EngineCore is produced from EngineInstance with an active candidate",
 TEST_CASE("EngineCore::create yields a present family mirroring graphics", "[engine][core][gpu]") {
   // The eager EngineCore::create path now delegates to the two-phase init, so it
   // must still produce a working device whose present family mirrors graphics.
-  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> core =
+  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineError> core =
     kisha::engine::EngineCore::create();
 
   REQUIRE(core.has_value());
@@ -89,7 +89,7 @@ TEST_CASE("EngineCore exposes a profile matching the active device", "[engine][c
   // The EngineProfile is populated at device creation from the active candidate's
   // physical-device properties and the negotiated extension lists, and must agree
   // with the live physical device exposed by the core.
-  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> core =
+  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineError> core =
     kisha::engine::EngineCore::create();
 
   REQUIRE(core.has_value());
@@ -109,15 +109,15 @@ TEST_CASE("EngineCore exposes a profile matching the active device", "[engine][c
 }
 
 TEST_CASE("EngineCore::create_presenter fails for an empty (headless) window handle", "[engine][core][gpu]") {
-  std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> core =
+  std::expected<kisha::engine::EngineCore, kisha::engine::EngineError> core =
     kisha::engine::EngineCore::create();
   REQUIRE(core.has_value());
 
-  const std::expected<kisha::engine::Presenter *, kisha::engine::EngineInitError> presenter =
+  const std::expected<kisha::engine::Presenter *, kisha::engine::EngineError> presenter =
     core->create_presenter(kisha::engine::NativeWindowHandle{});
 
   REQUIRE_FALSE(presenter.has_value());
-  REQUIRE(presenter.error() == kisha::engine::EngineInitError::SurfaceCreationFailed);
+  REQUIRE(presenter.error() == kisha::engine::EngineError::SurfaceCreationFailed);
   // The failed bind must not leave a dangling Presenter on the core.
   REQUIRE(core->presenter() == nullptr);
 }
@@ -151,11 +151,11 @@ TEST_CASE("EngineInstance init reports missing required instance layers", "[engi
   create_info.instance_spec.min_api_version = VK_API_VERSION_1_3;
   create_info.instance_spec.required_layers = {"VK_LAYER_KISHA_definitely_does_not_exist"};
 
-  const std::expected<kisha::engine::EngineInstance, kisha::engine::EngineInitError> result =
+  const std::expected<kisha::engine::EngineInstance, kisha::engine::EngineError> result =
     kisha::engine::EngineInstance::create(create_info);
 
   REQUIRE_FALSE(result.has_value());
-  REQUIRE(result.error() == kisha::engine::EngineInitError::MissingRequiredLayers);
+  REQUIRE(result.error() == kisha::engine::EngineError::MissingRequiredLayers);
 }
 
 TEST_CASE("Engine init reports missing required instance layers", "[engine][core]") {
@@ -163,11 +163,11 @@ TEST_CASE("Engine init reports missing required instance layers", "[engine][core
   create_info.instance_spec.min_api_version = VK_API_VERSION_1_3;
   create_info.instance_spec.required_layers = {"VK_LAYER_KISHA_definitely_does_not_exist"};
 
-  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> result =
+  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineError> result =
     kisha::engine::EngineCore::create(create_info);
 
   REQUIRE_FALSE(result.has_value());
-  REQUIRE(result.error() == kisha::engine::EngineInitError::MissingRequiredLayers);
+  REQUIRE(result.error() == kisha::engine::EngineError::MissingRequiredLayers);
 }
 
 TEST_CASE("Engine init reports missing required instance extensions", "[engine][core]") {
@@ -175,11 +175,11 @@ TEST_CASE("Engine init reports missing required instance extensions", "[engine][
   create_info.instance_spec.min_api_version = VK_API_VERSION_1_3;
   create_info.instance_spec.required_extensions = {"VK_KISHA_definitely_does_not_exist_extension"};
 
-  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineInitError> result =
+  const std::expected<kisha::engine::EngineCore, kisha::engine::EngineError> result =
     kisha::engine::EngineCore::create(create_info);
 
   REQUIRE_FALSE(result.has_value());
-  REQUIRE(result.error() == kisha::engine::EngineInitError::MissingRequiredExtensions);
+  REQUIRE(result.error() == kisha::engine::EngineError::MissingRequiredExtensions);
 }
 
 TEST_CASE("reconcile(InstanceSpec) unions names and takes max api version", "[engine][core]") {
@@ -235,7 +235,7 @@ TEST_CASE("create_instance succeeds with default requirements", "[engine][core][
   const vk::ApplicationInfo application_info = vk::ApplicationInfo{}
       .setApiVersion(VK_API_VERSION_1_3);
 
-  const std::expected<vk::raii::Instance, kisha::engine::EngineInitError> result =
+  const std::expected<vk::raii::Instance, kisha::engine::EngineError> result =
     kisha::engine::util::create_instance(context, application_info, {}, {});
 
   REQUIRE(result.has_value());

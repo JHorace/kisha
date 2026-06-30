@@ -58,7 +58,7 @@ namespace kisha::engine {
       return spec;
     }
 
-    std::expected<vk::raii::DebugUtilsMessengerEXT, EngineInitError> create_debug_messenger(const vk::raii::Instance &instance,
+    std::expected<vk::raii::DebugUtilsMessengerEXT, EngineError> create_debug_messenger(const vk::raii::Instance &instance,
                                                                                             const bool enable_validation) {
       if (!enable_validation) {
         return vk::raii::DebugUtilsMessengerEXT{nullptr};
@@ -72,7 +72,7 @@ namespace kisha::engine {
       return instance.createDebugUtilsMessengerEXT(debug_create_info)
           .transform_error([](const vk::Result result) {
             spdlog::error("Failed to create debug utils messenger: {}", vk::to_string(result));
-            return EngineInitError::InstanceCreationFailed;
+            return EngineError::InstanceCreationFailed;
           });
     }
 
@@ -94,7 +94,7 @@ namespace kisha::engine {
       };
     }
 
-    std::expected<DeviceBundle, EngineInitError> build_device_bundle(const vk::raii::PhysicalDevice &physical_device,
+    std::expected<DeviceBundle, EngineError> build_device_bundle(const vk::raii::PhysicalDevice &physical_device,
                                                                      const DeviceSelection &selection) {
       EngineProfile profile = build_profile(physical_device.getProperties(), selection);
       return util::create_logical_device(physical_device, selection.queues, selection.enabled_extensions)
@@ -108,7 +108,7 @@ namespace kisha::engine {
   EngineCore::EngineCore(vk::raii::Context &&context, vk::raii::Instance &&instance,
                          vk::raii::DebugUtilsMessengerEXT &&debug_messenger, vk::raii::PhysicalDevices &&physical_devices,
                          std::vector<DeviceSelection> &&device_candidates, const size_t active_candidate_index,
-                         vk::raii::Device &&device, Queues &&queues, EngineProfile &&profile)
+                         vk::raii::Device &&device, FrameRing&& frame_ring, Queues &&queues, EngineProfile &&profile)
       : _context(std::move(context)),
         _instance(std::move(instance)),
         _debug_messenger(std::move(debug_messenger)),
@@ -116,10 +116,11 @@ namespace kisha::engine {
         _device_candidates(std::move(device_candidates)),
         _active_candidate_index(active_candidate_index),
         _device(std::move(device)),
+        _frame_ring(std::move(frame_ring)),
         _queues(std::move(queues)),
         _profile(std::move(profile)) {}
 
-  std::expected<EngineCore, EngineInitError> EngineCore::create(const EngineCreateInfo &create_info) {
+  std::expected<EngineCore, EngineError> EngineCore::create(const EngineCreateInfo &create_info) {
     return EngineInstance::create(create_info)
         .and_then([](EngineInstance engine_instance) { return std::move(engine_instance).create_engine_core(); });
   }
@@ -134,12 +135,12 @@ namespace kisha::engine {
         physical_devices_(std::move(physical_devices)),
         device_candidates_(std::move(device_candidates)) {}
 
-  std::expected<EngineInstance, EngineInitError> EngineInstance::create(const EngineCreateInfo &create_info) {
+  std::expected<EngineInstance, EngineError> EngineInstance::create(const EngineCreateInfo &create_info) {
     const InstanceSpec instance_spec = util::reconcile(engine_instance_baseline(create_info), create_info.instance_spec);
     const DeviceSpec device_spec = util::reconcile(engine_device_baseline(), create_info.device_spec);
 
     if (instance_spec.min_api_version < VK_API_VERSION_1_3) {
-      return std::unexpected(EngineInitError::ApiVersionTooLow);
+      return std::unexpected(EngineError::ApiVersionTooLow);
     }
 
     vk::raii::Context context;
@@ -152,13 +153,13 @@ namespace kisha::engine {
         .setApiVersion(instance_spec.min_api_version);
 
     return util::create_instance(context, application_info, instance_spec.required_layers, instance_spec.required_extensions)
-        .and_then([&](vk::raii::Instance instance) -> std::expected<EngineInstance, EngineInitError> {
+        .and_then([&](vk::raii::Instance instance) -> std::expected<EngineInstance, EngineError> {
           return create_debug_messenger(instance, create_info.enable_validation)
-              .and_then([&](vk::raii::DebugUtilsMessengerEXT debug_messenger) -> std::expected<EngineInstance, EngineInitError> {
+              .and_then([&](vk::raii::DebugUtilsMessengerEXT debug_messenger) -> std::expected<EngineInstance, EngineError> {
                 std::expected<vk::raii::PhysicalDevices, vk::Result> physical_devices_result = instance.enumeratePhysicalDevices();
                 if (!physical_devices_result) {
                   spdlog::error("Failed to enumerate physical devices: {}", vk::to_string(physical_devices_result.error()));
-                  return std::unexpected(EngineInitError::NoSuitableDevice);
+                  return std::unexpected(EngineError::NoSuitableDevice);
                 }
                 vk::raii::PhysicalDevices physical_devices = std::move(*physical_devices_result);
 
@@ -166,7 +167,7 @@ namespace kisha::engine {
                     util::rank_physical_devices(physical_devices, device_spec);
                 if (!candidates) {
                   log_error(candidates.error());
-                  return std::unexpected(EngineInitError::NoSuitableDevice);
+                  return std::unexpected(EngineError::NoSuitableDevice);
                 }
 
                 const vk::PhysicalDeviceProperties preferred_properties =
@@ -180,10 +181,10 @@ namespace kisha::engine {
         });
   }
 
-  std::expected<EngineCore, EngineInitError> EngineInstance::create_engine_core() && {
+  std::expected<EngineCore, EngineError> EngineInstance::create_engine_core() && {
     if (device_candidates_.empty()) {
       spdlog::error("Cannot create a logical device: no suitable physical-device candidates");
-      return std::unexpected(EngineInitError::NoSuitableDevice);
+      return std::unexpected(EngineError::NoSuitableDevice);
     }
 
     constexpr std::size_t active_candidate_index = 0U;
@@ -194,15 +195,184 @@ namespace kisha::engine {
     spdlog::info("Creating logical device on '{}' (graphics family {}, present family {})",
                  std::string(properties.deviceName), selection.queues.indices.graphics, selection.queues.indices.present);
 
+    const QueueFamilyIndices &indices = selection.queues.indices;
+
     return build_device_bundle(physical_device, selection)
-        .transform([&](DeviceBundle bundle) {
-          return EngineCore(std::move(context_), std::move(instance_), std::move(debug_messenger_),
-                            std::move(physical_devices_), std::move(device_candidates_), active_candidate_index,
-                            std::move(bundle.device), std::move(bundle.queues), std::move(bundle.profile));
+        .and_then([&](DeviceBundle bundle) -> std::expected<EngineCore, EngineError>{
+          return FrameRing::create(bundle.device, FrameRing::FRAMES_IN_FLIGHT, indices.graphics,
+                                   indices.async_compute, indices.transfer)
+              .transform([&, bundle = std::move(bundle)](FrameRing ring) mutable {
+                return EngineCore(std::move(context_), std::move(instance_), std::move(debug_messenger_),
+                                  std::move(physical_devices_), std::move(device_candidates_), active_candidate_index,
+                                  std::move(bundle.device), std::move(ring), std::move(bundle.queues), std::move(bundle.profile));
+              });
         });
   }
 
-  std::expected<void, EngineInitError> EngineCore::reselect_device_for_surface(const vk::raii::SurfaceKHR &surface) {
+  namespace {
+    constexpr ImageHandle kSwapchainImageHandle{1U};
+  }
+
+  std::expected<FrameContext, EngineError> EngineCore::begin_frame() {
+    if (!_presenter || !_presenter->has_swapchain()) {
+      spdlog::error("Cannot begin a frame without a presenter and swapchain");
+      return std::unexpected(EngineError::ImageAcquisitionFailed);
+    }
+
+    std::expected<FrameRecorder *, EngineError> recorder = _frame_ring.begin_frame(_device);
+    if (!recorder) {
+      return std::unexpected(recorder.error());
+    }
+
+    std::expected<AcquiredFrame, EngineError> acquired =
+        _presenter->acquire_next_image(_device, (*recorder)->frame_slot);
+    if (!acquired) {
+      return std::unexpected(acquired.error());
+    }
+
+    if (acquired->result == vk::Result::eErrorOutOfDateKHR) {
+      spdlog::info("Swapchain was out of date; skipping frame and retrying next iteration");
+      return std::unexpected(EngineError::ImageAcquisitionFailed);
+    }
+
+    _state_tracker.register_image(kSwapchainImageHandle,
+                                  _presenter->swapchain_images()[acquired->image_index],
+                                  ImageState{vk::ImageLayout::eUndefined,
+                                             vk::PipelineStageFlagBits2::eTopOfPipe,
+                                             vk::AccessFlagBits2::eNone});
+
+    return FrameContext{acquired->image_index, acquired->image_available, *recorder, kSwapchainImageHandle};
+  }
+
+  std::expected<void, EngineError>
+  EngineCore::bind_shader_program(const vk::raii::CommandBuffer &command_buffer, const ShaderProgramHandle program,
+                                  const vk::Extent2D extent) const {
+    if (program.id == 0U || program.id > _shader_programs.size()) {
+      spdlog::error("Draw references an unknown shader program (id {})", program.id);
+      return std::unexpected(EngineError::UnknownResource);
+    }
+    const ShaderProgram &shader_program = _shader_programs[program.id - 1U];
+
+    const std::array<vk::ShaderStageFlagBits, 2U> stages{vk::ShaderStageFlagBits::eVertex,
+                                                         vk::ShaderStageFlagBits::eFragment};
+    const std::array<vk::ShaderEXT, 2U> shaders{*shader_program.shaders[0], *shader_program.shaders[1]};
+    command_buffer.bindShadersEXT(stages, shaders);
+
+    command_buffer.setViewportWithCount(vk::Viewport{0.F, 0.F, static_cast<float>(extent.width),
+                                                     static_cast<float>(extent.height), 0.F, 1.F});
+    command_buffer.setScissorWithCount(vk::Rect2D{{0, 0}, extent});
+    command_buffer.setRasterizerDiscardEnable(VK_FALSE);
+    command_buffer.setPrimitiveTopology(vk::PrimitiveTopology::eTriangleList);
+    command_buffer.setPrimitiveRestartEnable(VK_FALSE);
+    command_buffer.setVertexInputEXT({}, {}); // attributeless: no bindings, no attributes
+    command_buffer.setCullMode(vk::CullModeFlagBits::eNone);
+    command_buffer.setFrontFace(vk::FrontFace::eCounterClockwise);
+    command_buffer.setDepthTestEnable(VK_FALSE);
+    command_buffer.setDepthWriteEnable(VK_FALSE);
+    command_buffer.setDepthCompareOp(vk::CompareOp::eAlways);
+    command_buffer.setDepthBiasEnable(VK_FALSE);
+    command_buffer.setDepthBoundsTestEnable(VK_FALSE);
+    command_buffer.setStencilTestEnable(VK_FALSE);
+    command_buffer.setDepthClampEnableEXT(VK_FALSE);
+    command_buffer.setPolygonModeEXT(vk::PolygonMode::eFill);
+    command_buffer.setRasterizationSamplesEXT(vk::SampleCountFlagBits::e1);
+    const vk::SampleMask sample_mask = 0xFFFFFFFFU;
+    command_buffer.setSampleMaskEXT(vk::SampleCountFlagBits::e1, sample_mask);
+    command_buffer.setAlphaToCoverageEnableEXT(VK_FALSE);
+    command_buffer.setLogicOpEnableEXT(VK_FALSE);
+    const vk::Bool32 color_blend_enable = VK_FALSE;
+    command_buffer.setColorBlendEnableEXT(0U, color_blend_enable);
+    const vk::ColorComponentFlags color_write_mask = vk::ColorComponentFlagBits::eR |
+                                                     vk::ColorComponentFlagBits::eG |
+                                                     vk::ColorComponentFlagBits::eB |
+                                                     vk::ColorComponentFlagBits::eA;
+    command_buffer.setColorWriteMaskEXT(0U, color_write_mask);
+    return {};
+  }
+
+  std::expected<void, EngineError> EngineCore::end_frame(FrameContext &&frame) {
+    if (!_presenter || !_presenter->has_swapchain()) {
+      spdlog::error("Cannot end a frame without a presenter and swapchain");
+      return std::unexpected(EngineError::PresentFailed);
+    }
+    FrameRecorder *recorder = frame.recorder();
+    if (recorder == nullptr) {
+      spdlog::error("Cannot end a frame that has no active recorder");
+      return std::unexpected(EngineError::CommandRecordingFailed);
+    }
+
+    const vk::raii::CommandBuffer &command_buffer = recorder->graphics_command_buffer;
+    const Swapchain &swapchain = _presenter->swapchain();
+    const std::uint32_t image_index = frame.image_index();
+    const vk::Extent2D extent = swapchain.extent();
+    const vk::ImageView color_view = *swapchain.image_views()[image_index];
+
+    if (std::expected<void, vk::Result> begun = command_buffer.begin(
+            vk::CommandBufferBeginInfo{}.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
+        !begun) {
+      spdlog::error("Failed to begin command buffer: {}", vk::to_string(begun.error()));
+      return std::unexpected(EngineError::CommandRecordingFailed);
+    }
+
+    for (const PassDescription &pass : frame.description().passes) {
+      std::expected<PassBarriers, EngineError> barriers = _state_tracker.barriers_for(pass);
+      if (!barriers) {
+        return std::unexpected(barriers.error());
+      }
+      if (!barriers->image_barriers.empty()) {
+        command_buffer.pipelineBarrier2(barriers->dependency_info());
+      }
+
+      const vk::ClearValue clear_value{vk::ClearColorValue{pass.color.clear_color}};
+      const vk::RenderingAttachmentInfo color_attachment = vk::RenderingAttachmentInfo{}
+          .setImageView(color_view)
+          .setImageLayout(vk::ImageLayout::eColorAttachmentOptimal)
+          .setLoadOp(vk::AttachmentLoadOp::eClear)
+          .setStoreOp(vk::AttachmentStoreOp::eStore)
+          .setClearValue(clear_value);
+      const vk::RenderingInfo rendering_info = vk::RenderingInfo{}
+          .setRenderArea(vk::Rect2D{{0, 0}, extent})
+          .setLayerCount(1U)
+          .setColorAttachments(color_attachment);
+
+      command_buffer.beginRendering(rendering_info);
+      for (const DrawItem &draw : pass.draws) {
+        if (std::expected<void, EngineError> bound = bind_shader_program(command_buffer, draw.program, extent);
+            !bound) {
+          command_buffer.endRendering();
+          return std::unexpected(bound.error());
+        }
+        command_buffer.draw(draw.vertex_count, 1U, 0U, 0U);
+      }
+      command_buffer.endRendering();
+    }
+
+    std::expected<std::optional<vk::ImageMemoryBarrier2>, EngineError> present_barrier =
+        _state_tracker.transition_to(frame.swapchain_image(), vk::ImageLayout::ePresentSrcKHR,
+                                     vk::PipelineStageFlagBits2::eBottomOfPipe, vk::AccessFlagBits2::eNone);
+    if (!present_barrier) {
+      return std::unexpected(present_barrier.error());
+    }
+    if (present_barrier->has_value()) {
+      command_buffer.pipelineBarrier2(vk::DependencyInfo{}.setImageMemoryBarriers(**present_barrier));
+    }
+
+    if (std::expected<void, vk::Result> ended = command_buffer.end(); !ended) {
+      spdlog::error("Failed to end command buffer: {}", vk::to_string(ended.error()));
+      return std::unexpected(EngineError::CommandRecordingFailed);
+    }
+
+    if (std::expected<void, EngineError> submitted =
+            _frame_ring.submit_frame(_queues.graphics, *recorder, frame.image_available(),
+                                     *swapchain.render_finished(image_index));
+        !submitted) {
+      return std::unexpected(submitted.error());
+    }
+
+    return _presenter->present(_device, _queues.graphics, image_index).transform([](vk::Result) {});
+  }
+
+  std::expected<void, EngineError> EngineCore::reselect_device_for_surface(const vk::raii::SurfaceKHR &surface) {
     for (std::size_t index = 0U; index < _device_candidates.size(); ++index) {
       if (index == _active_candidate_index) {
         continue;
@@ -214,7 +384,7 @@ namespace kisha::engine {
         continue;
       }
 
-      std::expected<DeviceBundle, EngineInitError> bundle =
+      std::expected<DeviceBundle, EngineError> bundle =
           build_device_bundle(_physical_devices[candidate.index], candidate);
       if (!bundle) {
         return std::unexpected(bundle.error());
@@ -229,11 +399,11 @@ namespace kisha::engine {
     }
 
     spdlog::error("No physical-device candidate can present to the requested surface");
-    return std::unexpected(EngineInitError::NoSurfaceCapableDevice);
+    return std::unexpected(EngineError::NoSurfaceCapableDevice);
   }
 
-  std::expected<Presenter *, EngineInitError> EngineCore::create_presenter(const NativeWindowHandle &window_handle) {
-    std::expected<vk::raii::SurfaceKHR, EngineInitError> surface_result = util::create_surface(_instance, window_handle);
+  std::expected<Presenter *, EngineError> EngineCore::create_presenter(const NativeWindowHandle &window_handle) {
+    std::expected<vk::raii::SurfaceKHR, EngineError> surface_result = util::create_surface(_instance, window_handle);
     if (!surface_result) {
       return std::unexpected(surface_result.error());
     }
@@ -247,15 +417,63 @@ namespace kisha::engine {
 
     if (!active_supports) {
       // Rare: the preferred device cannot present to this surface. Switch to a ranked candidate that can before binding it.
-      std::expected<void, EngineInitError> reselected = reselect_device_for_surface(surface);
+      std::expected<void, EngineError> reselected = reselect_device_for_surface(surface);
       if (!reselected) {
         return std::unexpected(reselected.error());
       }
     }
 
     spdlog::info("Created presentation surface (presenting device '{}')", _profile.device_name);
-    _presenter.emplace(Presenter(std::move(surface), physical_device(),
-                                 _device_candidates[_active_candidate_index].queues.indices.present));
+    std::expected<Presenter, EngineError> presenter =
+        Presenter::create(std::move(surface), physical_device(),
+                          _device_candidates[_active_candidate_index].queues.indices.present, _device,
+                          FrameRing::FRAMES_IN_FLIGHT);
+    if (!presenter) {
+      return std::unexpected(presenter.error());
+    }
+
+    _presenter.emplace(std::move(*presenter));
     return &*_presenter;
+  }
+
+  namespace {
+    // TODO: we'll want to reflect these (probably at build time?)
+    constexpr const char *kShaderEntryPoint = "main";
+  }
+
+  std::expected<ShaderProgramHandle, EngineError>
+  EngineCore::create_shader_program(const ShaderProgramDescription &description) {
+    if (description.vertex_spirv.empty() || description.fragment_spirv.empty()) {
+      spdlog::error("Cannot create a shader program from empty SPIR-V");
+      return std::unexpected(EngineError::ShaderObjectCreationFailed);
+    }
+
+    const std::array<vk::ShaderCreateInfoEXT, 2U> shader_infos{
+        vk::ShaderCreateInfoEXT{}
+            .setFlags(vk::ShaderCreateFlagBitsEXT::eLinkStage)
+            .setStage(vk::ShaderStageFlagBits::eVertex)
+            .setNextStage(vk::ShaderStageFlagBits::eFragment)
+            .setCodeType(vk::ShaderCodeTypeEXT::eSpirv)
+            .setCodeSize(description.vertex_spirv.size_bytes())
+            .setPCode(description.vertex_spirv.data())
+            .setPName(kShaderEntryPoint),
+        vk::ShaderCreateInfoEXT{}
+            .setFlags(vk::ShaderCreateFlagBitsEXT::eLinkStage)
+            .setStage(vk::ShaderStageFlagBits::eFragment)
+            .setCodeType(vk::ShaderCodeTypeEXT::eSpirv)
+            .setCodeSize(description.fragment_spirv.size_bytes())
+            .setPCode(description.fragment_spirv.data())
+            .setPName(kShaderEntryPoint),
+    };
+
+    std::expected<std::vector<vk::raii::ShaderEXT>, vk::Result> shaders =
+        _device.createShadersEXT(shader_infos);
+    if (!shaders) {
+      spdlog::error("Failed to create shader objects: {}", vk::to_string(shaders.error()));
+      return std::unexpected(EngineError::ShaderObjectCreationFailed);
+    }
+
+    _shader_programs.push_back(ShaderProgram{std::move(*shaders)});
+    return ShaderProgramHandle{static_cast<std::uint32_t>(_shader_programs.size())};
   }
 }

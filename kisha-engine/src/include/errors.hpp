@@ -25,7 +25,7 @@ namespace kisha::engine {
     { error.describe() } -> std::convertible_to<std::string>;
   };
 
-  enum class EngineInitError : uint8_t {
+  enum class EngineError : uint8_t {
     Unknown = 0U,
     NotImplemented,
     ApiVersionTooLow,
@@ -41,6 +41,12 @@ namespace kisha::engine {
     SwapchainCreationFailed,
     NoSurfaceCapableDevice,
     PresentFailed,
+    FrameSyncCreationFailed,
+    ImageAcquisitionFailed,
+    ShaderObjectCreationFailed,
+    CommandRecordingFailed,
+    SubmitFailed,
+    UnknownResource,
   };
 
   struct MissingNamesError {
