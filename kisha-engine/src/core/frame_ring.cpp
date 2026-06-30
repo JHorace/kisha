@@ -39,8 +39,8 @@ namespace kisha::engine {
     std::expected<vk::raii::Semaphore, vk::Result> semaphore = device.createSemaphore(semaphore_create_info);
 
     if (!semaphore) {
-      //TODO:
-      return std::unexpected(EngineError::Unknown);
+      spdlog::error("Failed to create frame timeline semaphore: {}", vk::to_string(semaphore.error()));
+      return std::unexpected(EngineError::FrameSyncCreationFailed);
     }
 
     // We need one command pool per (thread, frame-in-flight, queue family). Since the engine is
